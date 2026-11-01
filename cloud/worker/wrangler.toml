@@ -4,13 +4,13 @@ compatibility_date = "2026-10-01"
 # Needed by the OAuth provider for Client ID Metadata Document (CIMD) clients.
 compatibility_flags = ["global_fetch_strictly_public"]
 
-# Not created yet. Create a KV namespace named OAUTH_KV and paste its id.
+# KV namespace OAUTH_KV.
 [[kv_namespaces]]
 binding = "OAUTH_KV"
-id = "REPLACE-WITH-KV-NAMESPACE-ID"
+id = "0d26552528104d9f82e683197fc48c47"
 
 # Workers VPC Service: the Cloudflare Tunnel on the Mac, host 127.0.0.1,
-# HTTP port 7007. Not created yet; paste its service id.
+# HTTP port 7007.
 [[vpc_services]]
 binding = "ORIGIN"
 service_id = "01a198d3-3711-7ab0-9961-1fafca289cac"
