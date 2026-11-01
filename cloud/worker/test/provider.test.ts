@@ -187,9 +187,11 @@ describe("OAuthProvider wiring (real library, in-memory KV)", () => {
 
     // 5. tools/call of a write tool is refused; tools/list is filtered; the bearer token never reaches the origin.
     let seenHeaders: Headers | undefined;
+    let seenUrl: string | undefined;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (_url: string, init: RequestInit) => {
+      vi.fn(async (url: string, init: RequestInit) => {
+        seenUrl = String(url);
         seenHeaders = new Headers(init.headers);
         return Response.json({ jsonrpc: "2.0", id: 1, result: { tools: TOOLS_FIXTURE } });
       }),
@@ -210,7 +212,7 @@ describe("OAuthProvider wiring (real library, in-memory KV)", () => {
     expect(tools.sort()).toEqual([...VISIBLE_TOOLS].sort());
     expect(seenHeaders!.has("authorization")).toBe(false);
     expect(seenHeaders!.has("origin")).toBe(false);
-    expect(seenHeaders!.get("cf-access-client-id")).toBe("test-access-id");
+    expect(seenUrl).toBe("http://127.0.0.1:7007/mcp");
 
     const send = await mcp({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "send_message", arguments: {} } });
     expect(((await send.json()) as { error: { message: string } }).error.message).toBe("tool not allowed");

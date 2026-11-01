@@ -36,7 +36,7 @@ It adds a spam rules watcher, kept in new files so upstream merges stay small:
   stay off until reviewed). Texts are untrusted input; without send tools a
   malicious text cannot make an agent send anything.
 - `cloud/worker/`: a Cloudflare Worker so claude.ai can reach `/mcp` on the
-  Mac through a Cloudflare Tunnel, with Google sign-in for one account and a
+  Mac through a Cloudflare Tunnel and Workers VPC (no public hostname), with Google sign-in for one account and a
   second read-only filter. Its tool list, `cloud/worker/readonly-tools.json`,
   is checked against the Go list by `internal/tools/readonly_test.go`.
   **Not deployed**; see `cloud/worker/README.md`.

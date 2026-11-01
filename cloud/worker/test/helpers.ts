@@ -2,18 +2,16 @@ import { vi } from "vitest";
 import type { Env } from "../src/env";
 
 export const PUBLIC_URL = "https://connector.test";
-export const ORIGIN_URL = "https://tunnel.test";
 export const ALLOWED = "owner@example.com";
 
 export function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     PUBLIC_URL,
-    ORIGIN_URL,
+    // Stand-in VPC binding: goes through global fetch, which tests stub.
+    ORIGIN: { fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init) } as unknown as Fetcher,
     ALLOWED_EMAIL: ALLOWED,
     GOOGLE_CLIENT_ID: "test-google-client-id",
     GOOGLE_CLIENT_SECRET: "test-google-client-secret",
-    CF_ACCESS_CLIENT_ID: "test-access-id",
-    CF_ACCESS_CLIENT_SECRET: "test-access-secret",
     ...overrides,
   } as Env;
 }

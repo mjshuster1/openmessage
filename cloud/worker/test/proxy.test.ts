@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ALLOWED_TOOLS } from "../src/allowlist";
 import { MAX_BODY_BYTES, handleMcp } from "../src/proxy";
 import readonlyRaw from "../readonly-tools.json?raw";
@@ -80,7 +80,7 @@ describe("method allowlist", () => {
       await handleMcp(new Request(`${env.PUBLIC_URL}/mcp`, { method, headers: { "Mcp-Session-Id": "s1" } }), env, up.fetchImpl);
     }
     expect(up.calls.map((c) => c.method)).toEqual(["GET", "DELETE"]);
-    expect(up.calls[0]!.url).toBe("https://tunnel.test/mcp");
+    expect(up.calls[0]!.url).toBe("http://127.0.0.1:7007/mcp");
     expect(up.calls[0]!.headers.get("mcp-session-id")).toBe("s1");
   });
   it("answers any other path with 404", async () => {
@@ -167,7 +167,7 @@ describe("key tricks that a case-folding JSON decoder would honor", () => {
 });
 
 describe("headers", () => {
-  it("drops everything but the allowlist and adds the Access token", async () => {
+  it("drops everything but the allowlist", async () => {
     const up = mockUpstream(ok);
     const req = post(rpc("ping"), {
       Authorization: "Bearer claude-token",
@@ -187,15 +187,14 @@ describe("headers", () => {
     for (const name of ["authorization", "cookie", "origin", "referer", "cf-connecting-ip", "cf-access-jwt-assertion", "x-forwarded-for"]) {
       expect(h.has(name)).toBe(false);
     }
-    expect(h.get("cf-access-client-id")).toBe("test-access-id");
-    expect(h.get("cf-access-client-secret")).toBe("test-access-secret");
+    expect(h.has("cf-access-client-id")).toBe(false);
     expect(h.get("mcp-session-id")).toBe("sess-1");
     expect(h.get("mcp-protocol-version")).toBe("2025-06-18");
     expect(h.get("last-event-id")).toBe("42");
     expect(h.get("content-type")).toBe("application/json");
     expect(h.get("accept")).toContain("text/event-stream");
     expect([...h.keys()].sort()).toEqual(
-      ["accept", "cf-access-client-id", "cf-access-client-secret", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id"],
+      ["accept", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id"],
     );
   });
   it("returns only Mcp-Session-Id and Content-Type from the origin", async () => {
@@ -370,9 +369,12 @@ describe("upstream errors", () => {
     const res = await handleMcp(post(rpc("ping")), env, boom.fetchImpl);
     expect(res.status).toBe(502);
     expect(await res.text()).not.toContain("10.0.0.1");
-    const none = mockUpstream(ok);
-    expect((await handleMcp(post(rpc("ping")), makeEnv({ CF_ACCESS_CLIENT_SECRET: "" }), none.fetchImpl)).status).toBe(502);
-    expect(none.calls).toHaveLength(0);
+    // No VPC binding configured: refuse without trying anything else.
+    const global = vi.fn();
+    vi.stubGlobal("fetch", global);
+    expect((await handleMcp(post(rpc("ping")), makeEnv({ ORIGIN: undefined as unknown as Fetcher }))).status).toBe(502);
+    expect(global).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
   it("passes 404 through as a generic body so clients start a new session", async () => {
     const up = mockUpstream(() => new Response("session abc not found in store", { status: 404 }));

@@ -14,6 +14,13 @@ const TOOL_CALL_PARAM_KEYS = new Set(["name", "arguments", "_meta"]);
 type RpcId = string | number;
 type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
+/**
+ * Where requests go through the VPC binding. Workers VPC always routes to the
+ * host and port set on the VPC Service; the host here only becomes the Host
+ * header, and OpenMessage refuses any Host that is not loopback.
+ */
+export const ORIGIN_MCP_URL = "http://127.0.0.1:7007/mcp";
+
 interface Rejection {
   id: RpcId | null;
   hasId: boolean;
@@ -152,14 +159,12 @@ function rewriteSseEvent(raw: string, ids: Set<string>): string {
   return changed ? rebuildEvent(parsed, JSON.stringify(value)) : raw;
 }
 
-function upstreamHeaders(request: Request, env: Env): Headers {
+function upstreamHeaders(request: Request): Headers {
   const headers = new Headers();
   for (const name of FORWARD_REQUEST_HEADERS) {
     const v = request.headers.get(name);
     if (v !== null) headers.set(name, v);
   }
-  headers.set("CF-Access-Client-Id", env.CF_ACCESS_CLIENT_ID);
-  headers.set("CF-Access-Client-Secret", env.CF_ACCESS_CLIENT_SECRET);
   return headers;
 }
 
@@ -195,7 +200,7 @@ function rejectionResponse(screened: Screened[], isBatch: boolean): Response {
 export async function handleMcp(
   request: Request,
   env: Env,
-  fetchImpl: FetchLike = (input, init) => fetch(input, init),
+  fetchImpl?: FetchLike,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname !== "/mcp") return new Response("Not found", { status: 404 });
@@ -231,13 +236,15 @@ export async function handleMcp(
   }
 
   const hasToolsList = toolsListIds.size > 0;
-  if (!env.ORIGIN_URL || !env.CF_ACCESS_CLIENT_ID || !env.CF_ACCESS_CLIENT_SECRET) return badGateway();
-  const headers = upstreamHeaders(request, env);
+  const origin = env.ORIGIN;
+  const send: FetchLike | undefined = fetchImpl ?? (origin ? (input, init) => origin.fetch(input, init) : undefined);
+  if (!send) return badGateway();
+  const headers = upstreamHeaders(request);
   if (body !== undefined && !headers.has("content-type")) headers.set("Content-Type", "application/json");
 
   let up: Response;
   try {
-    up = await fetchImpl(`${env.ORIGIN_URL.replace(/\/+$/, "")}/mcp`, {
+    up = await send(ORIGIN_MCP_URL, {
       method,
       headers,
       body,

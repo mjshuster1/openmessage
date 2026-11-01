@@ -1,25 +1,25 @@
 name = "openmessage-connector"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
-# Needed by the OAuth provider for Client ID Metadata Document (CIMD) clients,
-# and it makes fetch() to a hostname on our own zone go out through the public
-# edge (where Cloudflare Access sits) instead of straight to the origin.
+# Needed by the OAuth provider for Client ID Metadata Document (CIMD) clients.
 compatibility_flags = ["global_fetch_strictly_public"]
 
-# Not created yet. Run `wrangler kv namespace create OAUTH_KV` and paste the id.
+# Not created yet. Create a KV namespace named OAUTH_KV and paste its id.
 [[kv_namespaces]]
 binding = "OAUTH_KV"
 id = "REPLACE-WITH-KV-NAMESPACE-ID"
+
+# Workers VPC Service: the Cloudflare Tunnel on the Mac, host 127.0.0.1,
+# HTTP port 7007. Not created yet; paste its service id.
+[[vpc_services]]
+binding = "ORIGIN"
+service_id = "REPLACE-WITH-VPC-SERVICE-ID"
 
 [vars]
 # Public https origin of this Worker, no trailing slash. Must match the
 # redirect URI registered with Google (<PUBLIC_URL>/callback).
 PUBLIC_URL = "https://REPLACE-worker-hostname"
-# Tunnel hostname that Cloudflare Access protects, no trailing slash.
-ORIGIN_URL = "https://REPLACE-tunnel-hostname"
-# The one Google account allowed to sign in.
-ALLOWED_EMAIL = "REPLACE@example.com"
 
-# Secrets (set with `wrangler secret put`, never in this file):
-#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
-#   CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET
+# Secrets (set in the dashboard or with `wrangler secret put`, never in this file):
+#   ALLOWED_EMAIL (the one Google account allowed to sign in; a secret so it
+#   stays out of this public repo), GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
