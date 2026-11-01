@@ -43,3 +43,5 @@ output/
 # the data dir; ignored here in case a data dir is ever pointed at the repo.
 spam-rules.json
 spam-watch.jsonl
+cloud/worker/node_modules/
+cloud/worker/.wrangler/

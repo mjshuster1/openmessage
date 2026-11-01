@@ -49,6 +49,10 @@ type serveOptions struct {
 	mcpSSE   bool
 	mcpStdio bool
 
+	// mcpReadOnly (fork addition) keeps only read MCP tools; see
+	// internal/tools/readonly.go.
+	mcpReadOnly bool
+
 	// transportsSet/transportsOn record an explicit --transports or
 	// --no-transports override. When unset, transports follow the serve
 	// shape: any daemon-like shape runs them, the MCP-stdio-only client
@@ -675,6 +679,9 @@ func RunServe(logger zerolog.Logger, args ...string) error {
 		V2Primary: v2Primary,
 		V2:        mcpV2,
 	})
+	if opts.mcpReadOnly {
+		logger.Info().Strs("removed", tools.ApplyReadOnly(mcpSrv)).Msg("MCP read-only: write tools removed")
+	}
 
 	var mcpHTTPHandler http.Handler
 	if opts.mcpSSE {
@@ -952,6 +959,9 @@ func runServeMCPClient(logger zerolog.Logger, opts serveOptions) error {
 		V2Primary: v2Primary,
 		Daemon:    daemon,
 	})
+	if opts.mcpReadOnly {
+		logger.Info().Strs("removed", tools.ApplyReadOnly(mcpSrv)).Msg("MCP read-only: write tools removed")
+	}
 
 	logger.Info().
 		Bool("daemon_running", daemonUp).
@@ -1051,6 +1061,8 @@ func parseServeOptions(args []string) (serveOptions, error) {
 		case "--no-mcp-stdio":
 			enableExplicitTransportMode()
 			opts.mcpStdio = false
+		case "--mcp-read-only":
+			opts.mcpReadOnly = true
 		case "--transports":
 			opts.transportsSet = true
 			opts.transportsOn = true

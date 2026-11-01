@@ -31,8 +31,19 @@ It adds a spam rules watcher, kept in new files so upstream merges stay small:
   or unblocks one thread by hand through the running app (local endpoint
   `POST /api/spam/block`; needs the control token as a Bearer header, a
   loopback client and no browser Origin).
-- Upstream files touched: `cmd/serve.go` (hook, blocker, endpoint) and
-  `main.go` (two commands).
+- `serve --mcp-read-only` keeps only the MCP tools that read
+  (`internal/tools/readonly.go`, an allowlist, so tools upstream adds later
+  stay off until reviewed). Texts are untrusted input; without send tools a
+  malicious text cannot make an agent send anything.
+- `cloud/worker/`: a Cloudflare Worker so claude.ai can reach `/mcp` on the
+  Mac through a Cloudflare Tunnel, with Google sign-in for one account and a
+  second read-only filter. Its tool list, `cloud/worker/readonly-tools.json`,
+  is checked against the Go list by `internal/tools/readonly_test.go`.
+  **Not deployed**; see `cloud/worker/README.md`.
+- Upstream files touched: `cmd/serve.go` (hook, blocker, endpoint, the
+  `--mcp-read-only` flag), `main.go` (two commands, one help line),
+  `.gitignore` and `.vercelignore`. New files in upstream packages:
+  `internal/app/spam_block.go`, `internal/tools/readonly.go`.
 
 Data files live in the data dir (`~/.local/share/openmessage` by default) and
 never in this repository, because they hold phone numbers and message text:

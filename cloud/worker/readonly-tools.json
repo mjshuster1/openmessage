@@ -1,0 +1,14 @@
+{
+  "comment": "MCP tools allowed through the read-only filter. Single source of truth: the Worker imports this file and internal/tools/readonly_test.go checks the Go list against it.",
+  "tools": [
+    "get_conversation",
+    "get_messages",
+    "get_person_messages",
+    "get_person_messages_range",
+    "get_status",
+    "list_contacts",
+    "list_conversations",
+    "resolve_contact_routes",
+    "search_messages"
+  ]
+}
