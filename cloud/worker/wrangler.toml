@@ -13,7 +13,7 @@ id = "REPLACE-WITH-KV-NAMESPACE-ID"
 # HTTP port 7007. Not created yet; paste its service id.
 [[vpc_services]]
 binding = "ORIGIN"
-service_id = "REPLACE-WITH-VPC-SERVICE-ID"
+service_id = "01a198d3-3711-7ab0-9961-1fafca289cac"
 
 [vars]
 # Public https origin of this Worker, no trailing slash. Must match the
