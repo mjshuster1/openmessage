@@ -4,6 +4,31 @@ OpenMessage is a local-first messaging workspace for Google Messages, WhatsApp, 
 
 Built on [mautrix/gmessages](https://github.com/mautrix/gmessages) (libgm) for the Google Messages protocol and [mcp-go](https://github.com/mark3labs/mcp-go) for the MCP server.
 
+## About this fork
+
+`mjshuster1/openmessage` is a personal fork of
+[MaxGhenis/openmessage](https://github.com/MaxGhenis/openmessage), based on
+upstream commit `a455f63`. Sync by hand before each phase (GitHub "Sync fork",
+or `git fetch upstream && git rebase upstream/main`).
+
+It adds a spam rules watcher, kept in new files so upstream merges stay small:
+
+- `internal/spamwatch/`: checks each fresh incoming SMS/RCS text from a number
+  that is not in the phone's contacts against spam phrases and an optional
+  rules file. Phase 1 is **log-only**: it never blocks, deletes or changes a
+  message. Group texts and short codes are logged and tagged.
+- `cmd/spam_report.go` and one `case` in `main.go`: `openmessage spam-report
+  [--days N]` prints what would have been blocked.
+- One hook in `cmd/serve.go` next to the macOS notifier.
+
+Data files live in the data dir (`~/.local/share/openmessage` by default) and
+never in this repository, because they hold phone numbers and message text:
+
+- `spam-rules.json` (optional): `{"phrases": ["candidate name"], "numbers": ["5551234567"]}`.
+  Phrases match case-insensitively; numbers match on their last 10 digits.
+  Edits are picked up without a restart.
+- `spam-watch.jsonl`: one JSON line per match.
+
 ## What it does
 
 - **Google Messages for Mac** — pair your Android phone and read/send SMS + RCS locally

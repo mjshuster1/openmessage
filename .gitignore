@@ -38,3 +38,8 @@ output/
 /cc.json
 /.tmp-*.sql
 .gitnexus
+
+# Fork addition: spam watcher data (phone numbers and message text). Lives in
+# the data dir; ignored here in case a data dir is ever pointed at the repo.
+spam-rules.json
+spam-watch.jsonl

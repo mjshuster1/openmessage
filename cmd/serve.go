@@ -34,6 +34,7 @@ import (
 	"github.com/maxghenis/openmessage/internal/localapi"
 	"github.com/maxghenis/openmessage/internal/notify"
 	"github.com/maxghenis/openmessage/internal/readsource"
+	"github.com/maxghenis/openmessage/internal/spamwatch"
 	"github.com/maxghenis/openmessage/internal/storage/sqlite"
 	"github.com/maxghenis/openmessage/internal/telemetry"
 	"github.com/maxghenis/openmessage/internal/tools"
@@ -243,7 +244,12 @@ func RunServe(logger zerolog.Logger, args ...string) error {
 	if macNotifier.Enabled() {
 		logger.Info().Msg("Native macOS notifications enabled for fresh inbound messages")
 	}
-	a.OnIncomingMessage = macNotifier.NotifyIncomingMessage
+	// Fork addition (mjshuster1): log-only spam rules watcher. See internal/spamwatch.
+	spamWatcher := spamwatch.New(logger, a.Store, a.DataDir)
+	a.OnIncomingMessage = func(m *db.Message) {
+		macNotifier.NotifyIncomingMessage(m)
+		spamWatcher.Check(m)
+	}
 
 	var googleLifecycle *googleadapter.Adapter
 	var googleSupervisor *bridge.Supervisor
