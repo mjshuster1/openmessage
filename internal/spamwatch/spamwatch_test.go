@@ -226,7 +226,7 @@ func TestReportStripsControlCharacters(t *testing.T) {
 	if strings.ContainsAny(out, "\x1b‮") {
 		t.Errorf("control characters leaked: %q", out)
 	}
-	if !strings.Contains(out, "[group]") || !strings.Contains(out, "nothing was blocked") {
+	if !strings.Contains(out, "[group]") || !strings.Contains(out, "logged only") {
 		t.Errorf("report missing expected text: %s", out)
 	}
 }

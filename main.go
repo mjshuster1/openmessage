@@ -33,7 +33,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "  read <query> [--limit N] [--phone X] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--json] - Search the local store")
 		fmt.Fprintln(os.Stderr, "  thread <name|number|conversation_id> [--limit N] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--json] - Print a full conversation chronologically")
 		fmt.Fprintln(os.Stderr, "  threads [--limit N] [--json]             - List recent conversations (find an id/name for thread)")
-		fmt.Fprintln(os.Stderr, "  spam-report [--days N]                   - List texts the spam watcher would have blocked (log only)")
+		fmt.Fprintln(os.Stderr, "  spam-report [--days N]                   - List what the spam watcher logged or blocked")
+		fmt.Fprintln(os.Stderr, "  spam-block <conversation_id> [--no-report] [--unblock] - Block and report (or unblock) one thread via the running app")
 		fmt.Fprintln(os.Stderr, "  status [--json]                          - Show per-platform message counts and sync freshness")
 		fmt.Fprintln(os.Stderr, "  send <conversation_id> <msg> [--not-before-ms N] [--idempotency-key K] - Send text to an existing conversation")
 		fmt.Fprintln(os.Stderr, "  send-group <phone1,phone2,...> <msg>       - Send group message (MMS)")
@@ -76,6 +77,8 @@ func main() {
 		err = cmd.RunThreads(logger, os.Args[2:]...)
 	case "spam-report":
 		err = cmd.RunSpamReport(os.Args[2:])
+	case "spam-block":
+		err = cmd.RunSpamBlock(os.Args[2:])
 	case "status":
 		err = cmd.RunStatus(logger, os.Args[2:]...)
 	case "send":

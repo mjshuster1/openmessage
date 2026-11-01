@@ -2,9 +2,9 @@
 // are not in the phone's contacts against a list of spam rules and records
 // each match in a local log file.
 //
-// Phase 1 is log-only: it never blocks, deletes, or changes a message. It
-// exists so the rules can be reviewed against real traffic before any
-// automatic block-and-report is turned on.
+// By default it only logs. Setting "mode": "block" in the rules file turns
+// on automatic block-and-report for 1:1 threads (see block.go). It never
+// deletes a message and never acts on a saved contact.
 //
 // The rules file and the log hold phone numbers and message text. Both live
 // in the data dir (never in the repository).
@@ -67,6 +67,29 @@ var BuiltinPhrases = []string{
 type Rules struct {
 	Phrases []string `json:"phrases"`
 	Numbers []string `json:"numbers"`
+
+	// Mode is "log" (default) or "block". Anything else means "log".
+	Mode string `json:"mode,omitempty"`
+	// NoReport makes automatic blocks plain blocks instead of
+	// block-and-report.
+	NoReport bool `json:"no_report,omitempty"`
+	// BlockShortCodes allows automatic blocks of 5-6 digit senders.
+	BlockShortCodes bool `json:"block_short_codes,omitempty"`
+	// MaxBlocksPerDay caps automatic blocks per local day. 0 means the
+	// default (DefaultMaxBlocksPerDay).
+	MaxBlocksPerDay int `json:"max_blocks_per_day,omitempty"`
+}
+
+// DefaultMaxBlocksPerDay bounds the damage a bad rule can do in one day.
+const DefaultMaxBlocksPerDay = 25
+
+func (r Rules) blockMode() bool { return strings.EqualFold(strings.TrimSpace(r.Mode), "block") }
+
+func (r Rules) maxBlocksPerDay() int {
+	if r.MaxBlocksPerDay > 0 {
+		return r.MaxBlocksPerDay
+	}
+	return DefaultMaxBlocksPerDay
 }
 
 // Store is the subset of *db.Store the watcher reads.
@@ -88,6 +111,12 @@ type Entry struct {
 	ParticipantContID string   `json:"participant_contact_id,omitempty"`
 	Matched           []string `json:"matched"`
 	Snippet           string   `json:"snippet"`
+	// Action is what happened: "logged", "blocked", "block_failed",
+	// "manual_block", "manual_block_failed", "manual_unblock",
+	// "manual_unblock_failed". Empty in Phase 1 logs (means "logged").
+	Action string `json:"action,omitempty"`
+	// Note says why a match was only logged in block mode, or the error.
+	Note string `json:"note,omitempty"`
 }
 
 // Watcher is safe for concurrent use.
@@ -104,6 +133,12 @@ type Watcher struct {
 	contacts      map[string]struct{}
 	contactsAt    time.Time
 	warnedNoConts bool
+
+	blocker      BlockFunc
+	blockDay     string
+	blocksToday  int
+	blockCounted bool
+	wg           sync.WaitGroup
 }
 
 // New returns a watcher that reads rules from and writes its log to dataDir.
@@ -137,15 +172,43 @@ func (w *Watcher) Check(msg *db.Message) {
 	if !ok {
 		return
 	}
+	rules := w.rules()
+	if phone, reason := w.autoBlockDecision(rules, entry); reason == "" {
+		// Never call the blocker on this goroutine: for Google it is
+		// libgm's event goroutine, which also delivers the reply.
+		w.wg.Add(1)
+		go func() {
+			defer w.wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					w.logger.Error().Interface("panic", r).Msg("Recovered from panic in spam auto-block")
+				}
+			}()
+			w.runAutoBlock(rules, entry, phone)
+		}()
+		return
+	} else if rules.blockMode() {
+		entry.Note = reason
+	}
+	entry.Action = "logged"
+	w.record(entry)
+}
+
+func (w *Watcher) record(entry Entry) {
 	if err := w.appendLog(entry); err != nil {
 		w.logger.Warn().Err(err).Msg("Failed to write spam-watch log")
 		return
 	}
-	w.logger.Info().
-		Str("conv_id", entry.ConversationID).
+	ev := w.logger.Info()
+	if strings.HasSuffix(entry.Action, "_failed") {
+		ev = w.logger.Warn()
+	}
+	ev.Str("conv_id", entry.ConversationID).
 		Strs("matched", entry.Matched).
 		Bool("group", entry.IsGroup).
-		Msg("Spam rules matched (log only, nothing blocked)")
+		Str("action", entry.Action).
+		Str("note", entry.Note).
+		Msg("Spam watcher")
 }
 
 func (w *Watcher) evaluate(msg *db.Message) (Entry, bool) {
@@ -156,8 +219,7 @@ func (w *Watcher) evaluate(msg *db.Message) (Entry, bool) {
 		return Entry{}, false
 	}
 
-	rules := w.rules()
-	matched := matchRules(rules, msg.SenderNumber, msg.Body)
+	matched := matchRules(w.rules(), msg.SenderNumber, msg.Body)
 	if len(matched) == 0 {
 		return Entry{}, false
 	}
@@ -328,6 +390,29 @@ func IsShortCode(number string) bool {
 		}
 	}
 	return len(n) == 5 || len(n) == 6
+}
+
+// otherParticipantNumber returns the number of the one participant who is
+// not the user, or "" if there is not exactly one.
+func otherParticipantNumber(participantsJSON string) string {
+	var ps []struct {
+		Number string `json:"number"`
+		IsMe   bool   `json:"is_me"`
+	}
+	if json.Unmarshal([]byte(participantsJSON), &ps) != nil {
+		return ""
+	}
+	found := ""
+	for _, p := range ps {
+		if p.IsMe || strings.TrimSpace(p.Number) == "" {
+			continue
+		}
+		if found != "" {
+			return ""
+		}
+		found = strings.TrimSpace(p.Number)
+	}
+	return found
 }
 
 func participantContactID(participantsJSON, senderNumber string) string {

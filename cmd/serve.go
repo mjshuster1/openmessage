@@ -244,8 +244,11 @@ func RunServe(logger zerolog.Logger, args ...string) error {
 	if macNotifier.Enabled() {
 		logger.Info().Msg("Native macOS notifications enabled for fresh inbound messages")
 	}
-	// Fork addition (mjshuster1): log-only spam rules watcher. See internal/spamwatch.
+	// Fork addition (mjshuster1): spam rules watcher (logs by default). See internal/spamwatch.
 	spamWatcher := spamwatch.New(logger, a.Store, a.DataDir)
+	spamWatcher.SetBlocker(func(conversationID, phone, action string) error {
+		return a.SpamBlockConversation(conversationID, phone, app.SpamBlockAction(action))
+	})
 	a.OnIncomingMessage = func(m *db.Message) {
 		macNotifier.NotifyIncomingMessage(m)
 		spamWatcher.Check(m)
@@ -790,6 +793,8 @@ func RunServe(logger zerolog.Logger, args ...string) error {
 		} else {
 			httpHandler = web.ProtectLocalControl(controlAuth.Handler(mcpHTTPHandler))
 		}
+		// Fork addition (mjshuster1): manual spam block/unblock endpoint.
+		httpHandler = spamWatcher.WrapHTTP(httpHandler, localapi.LoadControlToken(a.DataDir))
 
 		ln, err := net.Listen("tcp", listenAddr)
 		if err != nil {

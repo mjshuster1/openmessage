@@ -15,19 +15,33 @@ It adds a spam rules watcher, kept in new files so upstream merges stay small:
 
 - `internal/spamwatch/`: checks each fresh incoming SMS/RCS text from a number
   that is not in the phone's contacts against spam phrases and an optional
-  rules file. Phase 1 is **log-only**: it never blocks, deletes or changes a
-  message. Group texts and short codes are logged and tagged.
-- `cmd/spam_report.go` and one `case` in `main.go`: `openmessage spam-report
-  [--days N]` prints what would have been blocked.
-- One hook in `cmd/serve.go` next to the macOS notifier.
+  rules file, and logs every match. Group texts and short codes are logged
+  and tagged. It never deletes a message and never acts on a saved contact.
+- Blocking is **off by default**. `"mode": "block"` in the rules file turns on
+  automatic block-and-report for 1:1 threads only: never group threads, not
+  short codes unless `"block_short_codes": true`, at most 25 a day (change
+  with `"max_blocks_per_day"`). `"no_report": true` blocks without reporting.
+  The block runs off the libgm event goroutine, which also delivers Google's
+  reply.
+- `internal/app/spam_block.go`: the block / block-and-report / unblock call
+  (libgm `UpdateConversation`, request shaped like mautrix-gmessages'
+  `HandleMatrixBlockUser`).
+- `openmessage spam-report [--days N]` prints what was logged or blocked.
+- `openmessage spam-block <conversation_id> [--no-report] [--unblock]` blocks
+  or unblocks one thread by hand through the running app (local endpoint
+  `POST /api/spam/block`; needs the control token as a Bearer header, a
+  loopback client and no browser Origin).
+- Upstream files touched: `cmd/serve.go` (hook, blocker, endpoint) and
+  `main.go` (two commands).
 
 Data files live in the data dir (`~/.local/share/openmessage` by default) and
 never in this repository, because they hold phone numbers and message text:
 
-- `spam-rules.json` (optional): `{"phrases": ["candidate name"], "numbers": ["5551234567"]}`.
+- `spam-rules.json` (optional), for example
+  `{"phrases": ["candidate name"], "numbers": ["5551234567"], "mode": "log"}`.
   Phrases match case-insensitively; numbers match on their last 10 digits.
   Edits are picked up without a restart.
-- `spam-watch.jsonl`: one JSON line per match.
+- `spam-watch.jsonl`: one JSON line per match or block action.
 
 ## What it does
 
