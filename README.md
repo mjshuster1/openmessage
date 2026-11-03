@@ -54,6 +54,9 @@ It adds a spam rules watcher, kept in new files so upstream merges stay small:
   `launchctl kickstart -k gui/$(id -u)/com.mjshuster.openmessage.serve`.
   Logs: `~/Library/Logs/openmessage/`. The agents need a logged-in user, so
   after a reboot nothing runs until login (automatic login needs FileVault off).
+- `cloud/vm/`: setup scripts and steps for running OpenMessage on a Google
+  Cloud e2-micro instead of the Mac, behind the same Worker (phase 1 test:
+  72 hours with no Mac and no browser).
 - Upstream files touched: `cmd/serve.go` (hook, blocker, endpoint, the
   `--mcp-read-only` flag), `main.go` (three commands, help lines),
   `.gitignore` and `.vercelignore`. New files in upstream packages:

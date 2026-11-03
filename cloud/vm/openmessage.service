@@ -1,0 +1,22 @@
+[Unit]
+Description=OpenMessage (read-only MCP for the claude.ai connector)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=openmessage
+Group=openmessage
+Environment=OPENMESSAGES_DATA_DIR=/var/lib/openmessage
+Environment=OPENMESSAGES_HOST=127.0.0.1
+Environment=OPENMESSAGES_PORT=7007
+ExecStart=/usr/local/bin/openmessage serve --mcp-sse --mcp-read-only
+Restart=on-failure
+RestartSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/openmessage
+
+[Install]
+WantedBy=multi-user.target

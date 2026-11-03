@@ -1,0 +1,7 @@
+[Unit]
+Description=Log OpenMessage status for the cloud test
+
+[Service]
+Type=oneshot
+User=openmessage
+ExecStart=/usr/local/bin/om-status-log.sh

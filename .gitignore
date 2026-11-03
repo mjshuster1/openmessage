@@ -45,3 +45,6 @@ spam-rules.json
 spam-watch.jsonl
 cloud/worker/node_modules/
 cloud/worker/.wrangler/
+
+# Linux binary built for the cloud VM test
+/cloud/vm/openmessage
