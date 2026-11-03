@@ -28,7 +28,7 @@ the whole test.
 | File | What it does |
 |---|---|
 | `setup-vm.sh` | One-time root setup: curl and jq, 1 GB swap, `openmessage` system user, data dir `/var/lib/openmessage` (mode 700), binary, units. Enables but does not start OpenMessage. |
-| `openmessage.service` | `serve --mcp-sse --mcp-read-only` on 127.0.0.1:7007, sandboxed, restarts on failure. |
+| `openmessage.service` | `serve --web --mcp-sse --mcp-read-only` on 127.0.0.1:7007 (`--web` serves `/api/status` for the status log), sandboxed, restarts on failure. |
 | `om-status-log.sh`, `.service`, `.timer` | Every 5 minutes, one line of `/api/status` (connected, state, block reason) to `/var/lib/openmessage/test-status.jsonl`. |
 | `score.sh` | Hours covered, minutes disconnected, park samples, and each down sample. |
 

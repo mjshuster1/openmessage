@@ -9,7 +9,7 @@ Group=openmessage
 Environment=OPENMESSAGES_DATA_DIR=/var/lib/openmessage
 Environment=OPENMESSAGES_HOST=127.0.0.1
 Environment=OPENMESSAGES_PORT=7007
-ExecStart=/usr/local/bin/openmessage serve --mcp-sse --mcp-read-only
+ExecStart=/usr/local/bin/openmessage serve --web --mcp-sse --mcp-read-only
 Restart=on-failure
 RestartSec=30
 NoNewPrivileges=true
