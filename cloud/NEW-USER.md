@@ -70,8 +70,11 @@ user's Cloud Shell (it has gcloud, signed in as them):
 ```bash
 git clone https://github.com/mjshuster1/openmessage && cd openmessage
 gcloud config set project <their project>
-cloud/vm/create-vm.sh --release <tag>
+cloud/vm/create-vm.sh --release <tag> --timezone <user's zone, e.g. America/New_York>
 ```
+
+Cloud Shell's clock is UTC, so pass `--timezone`: the VM uses it for alert
+times and the connector's "synced through" line.
 
 `<tag>` is the newest release on the fork (`gh release list --repo
 mjshuster1/openmessage`; publish one with `cloud/vm/release-vm.sh` if `main`

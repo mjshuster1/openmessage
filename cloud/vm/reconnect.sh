@@ -3,6 +3,8 @@
 # Use it for the first pairing and whenever alerts say "needs reconnecting".
 #
 #   cloud/vm/reconnect.sh [--name om-test] [--zone us-east1-b] [--project <id>] [--no-watch]
+#                         [--cookies <file>]   (a cookie file captured another way,
+#                                               e.g. from Firefox; deleted after copying)
 #
 # Run it on a computer with Chrome, Node 22+ and gcloud (signed in to the VM's
 # project), with the phone in hand. It:
@@ -25,12 +27,14 @@ NAME=om-test
 ZONE=us-east1-b
 PROJECT_ARGS=()
 WATCH=yes
+GIVEN=
 while [ $# -gt 0 ]; do
   case "$1" in
     --name) NAME=$2; shift 2 ;;
     --zone) ZONE=$2; shift 2 ;;
     --project) PROJECT_ARGS=(--project "$2"); shift 2 ;;
     --no-watch) WATCH=no; shift ;;
+    --cookies) GIVEN=$2; shift 2 ;;
     -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
@@ -42,8 +46,12 @@ status() {
   vm 'curl -s -m 5 127.0.0.1:7007/api/status | jq -r "if .google == null then \"not running\" else \"\(if .google.connected then \"connected\" else \"DISCONNECTED\" end) (\(.google.supervisor.state // \"?\")\(if .google.supervisor.block_reason then \", \" + .google.supervisor.block_reason else \"\" end))\" end" 2>/dev/null || echo "not running"'
 }
 
-command -v node >/dev/null || { echo "Node 22+ is needed (https://nodejs.org)." >&2; exit 1; }
-node -e 'process.exit(+process.versions.node.split(".")[0] >= 22 ? 0 : 1)' || { echo "Node 22+ is needed; this is $(node --version)." >&2; exit 1; }
+if [ -z "$GIVEN" ]; then
+  command -v node >/dev/null || { echo "Node 22+ is needed (https://nodejs.org)." >&2; exit 1; }
+  node -e 'process.exit(+process.versions.node.split(".")[0] >= 22 ? 0 : 1)' || { echo "Node 22+ is needed; this is $(node --version)." >&2; exit 1; }
+else
+  [ -f "$GIVEN" ] || { echo "No such file: $GIVEN" >&2; exit 1; }
+fi
 
 echo "Checking $NAME ..."
 now=$(status | tail -1)
@@ -58,8 +66,13 @@ cleanup_local() { rm -rf "$(dirname "$COOKIES")"; }
 trap cleanup_local EXIT
 
 echo
-echo "Step 1 of 3: sign in (a separate Chrome window opens)."
-node "$HERE/capture-google-cookies.mjs" "$COOKIES"
+if [ -n "$GIVEN" ]; then
+  echo "Step 1 of 3: using $GIVEN (it will be deleted after copying)."
+  mv "$GIVEN" "$COOKIES"
+else
+  echo "Step 1 of 3: sign in (a separate Chrome window opens)."
+  node "$HERE/capture-google-cookies.mjs" "$COOKIES"
+fi
 
 echo
 echo "Step 2 of 3: copying the login to the VM ..."
@@ -75,7 +88,7 @@ vm 'set -u
   sudo systemctl stop openmessage
   sudo chown openmessage:openmessage "$f" && sudo chmod 600 "$f"
   sudo -u openmessage OPENMESSAGES_DATA_DIR=/var/lib/openmessage stdbuf -oL -eL \
-    /usr/local/bin/openmessage pair --google-file "$f" 2>&1 | grep --line-buffered -E "EMOJI|successful|FTL|rror" | grep --line-buffered -v "HMAC mismatch"
+    /usr/local/bin/openmessage pair --google-file "$f" 2>&1 | grep --line-buffered -E "EMOJI|successful|FTL|rror" | grep --line-buffered -v "HMAC mismatch" | sed -u "s/\x1b\[[0-9;]*m//g"
   echo "PAIR_EXIT=${PIPESTATUS[0]}"
   sudo systemctl start openmessage' | while IFS= read -r line; do
   case "$line" in

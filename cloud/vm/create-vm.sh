@@ -3,6 +3,7 @@
 #
 #   cloud/vm/create-vm.sh --release <tag> [--name om-test] [--zone us-east1-b]
 #                         [--repo mjshuster1/openmessage] [--project <id>] [--no-tunnel]
+#                         [--timezone America/New_York]   (default: this computer's)
 #
 # Run it in Cloud Shell or anywhere gcloud is signed in to the project
 # (`gcloud config set project <id>` or --project). It:
@@ -29,6 +30,7 @@ REPO=mjshuster1/openmessage
 RELEASE=
 PROJECT_ARGS=()
 TUNNEL=yes
+TIMEZONE=
 while [ $# -gt 0 ]; do
   case "$1" in
     --release) RELEASE=$2; shift 2 ;;
@@ -37,12 +39,22 @@ while [ $# -gt 0 ]; do
     --repo) REPO=$2; shift 2 ;;
     --project) PROJECT_ARGS=(--project "$2"); shift 2 ;;
     --no-tunnel) TUNNEL=no; shift ;;
+    --timezone) TIMEZONE=$2; shift 2 ;;
     -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
 [ -n "$RELEASE" ] || { echo "--release <tag> is required (see release-vm.sh)" >&2; exit 2; }
 HERE=$(cd "$(dirname "$0")" && pwd)
+if [ -z "$TIMEZONE" ]; then
+  TIMEZONE=$(timedatectl show -p Timezone --value 2>/dev/null || readlink /etc/localtime 2>/dev/null | sed -E 's|.*/zoneinfo/||' || true)
+fi
+if [ -z "$TIMEZONE" ] || [ "$TIMEZONE" = UTC ] || [ "$TIMEZONE" = Etc/UTC ]; then
+  echo "Note: using UTC for the VM's clock (alerts and sync times). Cloud Shell is always UTC;"
+  echo "      pass --timezone America/New_York (or the user's zone) to use local time."
+  TIMEZONE=UTC
+fi
+[[ "$TIMEZONE" =~ ^[A-Za-z0-9_+/-]+$ ]] || { echo "--timezone: an IANA name like America/New_York" >&2; exit 2; }
 G=(gcloud ${PROJECT_ARGS[@]+"${PROJECT_ARGS[@]}"})
 
 case "$ZONE" in
@@ -66,7 +78,7 @@ echo "Creating $NAME in $ZONE from $REPO $RELEASE ..."
   --machine-type e2-micro \
   --image-family debian-12 --image-project debian-cloud \
   --boot-disk-size 30GB --boot-disk-type pd-standard \
-  --metadata "om-repo=$REPO,om-release=$RELEASE" \
+  --metadata "om-repo=$REPO,om-release=$RELEASE,om-timezone=$TIMEZONE" \
   --metadata-from-file "startup-script=$HERE/startup.sh"
 
 echo "Waiting for the startup script (usually 1-3 minutes) ..."

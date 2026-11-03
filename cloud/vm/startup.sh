@@ -26,6 +26,15 @@ if [ -z "${OM_ASSETS:-}" ] && { [ -z "$REPO" ] || [ -z "$TAG" ]; }; then
   log "metadata om-repo and om-release are required; nothing installed"
   exit 1
 fi
+# Time zone for alerts, freshness lines and logs (metadata om-timezone, an IANA
+# name such as America/New_York). Applied on every boot, before the
+# already-installed check, so changing it only needs a reboot.
+TZW=$(md om-timezone)
+if [ -n "$TZW" ] && [ -f "/usr/share/zoneinfo/$TZW" ] && [ "$(timedatectl show -p Timezone --value 2>/dev/null)" != "$TZW" ]; then
+  timedatectl set-timezone "$TZW" && log "time zone set to $TZW"
+  systemctl is-active --quiet openmessage 2>/dev/null && systemctl restart openmessage
+fi
+
 WANT="${REPO}@${TAG}"
 STAMP=/var/lib/openmessage-release
 if [ -z "${OM_ASSETS:-}" ] && [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$WANT" ]; then

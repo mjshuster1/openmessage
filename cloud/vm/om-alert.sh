@@ -64,7 +64,7 @@ fi
 [ "$pkind" = down ] || { since=$now; notified=0; }
 if [ "$notified" = 0 ]; then
   if [ "$kind" = parked ]; then
-    send "$ALERT_NAME: needs reconnecting" "Google Messages stopped at $(fmt_time "$since") ($reason). It won't fix itself: run the reconnect steps (cloud/vm/README.md, Reconnect)." high warning
+    send "$ALERT_NAME: needs reconnecting" "Google Messages stopped at $(fmt_time "$since") ($reason). It won't fix itself: run the reconnect command once (your guide, 'If it stops')." high warning
     notified=1
   elif [ $(( now - since )) -ge $(( ALERT_AFTER_MIN * 60 )) ]; then
     send "$ALERT_NAME: disconnected" "Google Messages has been down since $(fmt_time "$since") ($reason). It usually recovers on its own; you'll get another notice if it does." default warning
