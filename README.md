@@ -39,7 +39,7 @@ It adds a spam rules watcher, kept in new files so upstream merges stay small:
   Mac through a Cloudflare Tunnel and Workers VPC (no public hostname), with Google sign-in for one account and a
   second read-only filter. Its tool list, `cloud/worker/readonly-tools.json`,
   is checked against the Go list by `internal/tools/readonly_test.go`.
-  **Not deployed**; see `cloud/worker/README.md`.
+  Deployed 2026-11-02 at `openmessage-connector.mjshuster1.workers.dev`; see `cloud/worker/README.md`.
 - Upstream files touched: `cmd/serve.go` (hook, blocker, endpoint, the
   `--mcp-read-only` flag), `main.go` (two commands, one help line),
   `.gitignore` and `.vercelignore`. New files in upstream packages:

@@ -1,6 +1,6 @@
 # OpenMessage connector (Cloudflare Worker)
 
-A small Worker that lets claude.ai's custom MCP connector read from the OpenMessage MCP server on the Mac mini. Read-only. Nothing here is deployed yet.
+A small Worker that lets claude.ai's custom MCP connector read from the OpenMessage MCP server on the Mac mini. Read-only. Deployed 2026-11-02 at `https://openmessage-connector.mjshuster1.workers.dev` (claude.ai connector URL: `/mcp`).
 
 ## Request path
 
