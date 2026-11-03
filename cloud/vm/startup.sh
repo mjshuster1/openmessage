@@ -74,5 +74,8 @@ if [ "$was_active" = yes ]; then
   log "restarted OpenMessage on the new binary"
 fi
 echo "$WANT" > "$STAMP"
+# Flush now: a hard reset within ~30 s of install otherwise loses the stamp
+# (seen 2026-11-03) and the next boot installs again.
+sync
 log "installed $WANT"
 log "done"
