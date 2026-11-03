@@ -44,7 +44,7 @@ The tests include a run through the real OAuth library with an in-memory KV: reg
 4. Deploy the Worker once to learn its `workers.dev` hostname. Set `PUBLIC_URL` to it in `wrangler.toml`.
 5. Google Cloud Console: create an OAuth client (Web application) with the redirect URI `<PUBLIC_URL>/callback`. Keep the client id and secret.
 6. Set the secrets: `ALLOWED_EMAIL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
-7. On the Mac, start OpenMessage with `--mcp-read-only`.
+7. On the Mac, start OpenMessage with `./openmessage serve --web --mcp-sse --mcp-read-only`. Plain `serve` turns on only the web UI; without `--mcp-sse` there is no `/mcp` and claude.ai reports "no MCP server found".
 8. Deploy again.
 9. In claude.ai, add a custom connector with the URL `<PUBLIC_URL>/mcp`, then sign in with the allowed Google account.
 10. Check: `tools/list` shows only the read tools, and asking Claude to send a message fails.
