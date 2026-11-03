@@ -1,6 +1,6 @@
 # OpenMessage connector (Cloudflare Worker)
 
-A small Worker that lets claude.ai's custom MCP connector read from the OpenMessage MCP server on the Mac mini. Read-only. Deployed 2026-11-02 at `https://openmessage-connector.mjshuster1.workers.dev` (claude.ai connector URL: `/mcp`).
+A small Worker that lets claude.ai's custom MCP connector read from an OpenMessage MCP server: first the Mac mini, since 2026-11-03 the Google Cloud VM in `../vm/`. Read-only. Deployed 2026-11-02 at `https://openmessage-connector.mjshuster1.workers.dev` (claude.ai connector URL: `/mcp`). Setting one up for another person: [`../NEW-USER.md`](../NEW-USER.md), with `wrangler.example.toml` as their config.
 
 ## Request path
 
@@ -8,11 +8,11 @@ A small Worker that lets claude.ai's custom MCP connector read from the OpenMess
 claude.ai
   -> this Worker on workers.dev (OAuth 2.1, Google sign-in, MCP filter)
   -> Workers VPC Service binding (ORIGIN)
-  -> Cloudflare Tunnel, cloudflared on the Mac (no public hostname)
+  -> Cloudflare Tunnel, cloudflared on the host (the VM; earlier the Mac), no public hostname
   -> OpenMessage, /mcp on 127.0.0.1:7007
 ```
 
-The Mac has no public address. Only a Worker bound to the VPC Service can reach it. Workers VPC is in beta (free on all plans during the beta, per Cloudflare's docs as of Nov 2026).
+The host has no public address. Only a Worker bound to the VPC Service can reach it. Workers VPC is in beta (free on all plans during the beta, per Cloudflare's docs as of Nov 2026).
 
 ## Security model
 
@@ -37,6 +37,8 @@ npx tsc --noEmit
 The tests include a run through the real OAuth library with an in-memory KV: register a client, consent, mock Google, token, then a filtered `tools/list`.
 
 ## Deploy checklist
+
+This is the original Mac setup, editing `wrangler.toml`. For anyone else, copy `wrangler.example.toml` to `wrangler.<name>.toml` (git ignores it) and add `-c wrangler.<name>.toml` to every wrangler command; `../NEW-USER.md` has the full order for a VM host.
 
 1. Workers VPC dashboard, Tunnels tab: create a tunnel. Install `cloudflared` on the Mac with the commands the dashboard shows, including the service install with the token. No public hostname.
 2. Workers VPC dashboard, VPC Services tab: create a service on that tunnel, host `127.0.0.1`, HTTP port `7007`. Put its service id in `wrangler.toml`.

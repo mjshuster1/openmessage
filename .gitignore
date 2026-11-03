@@ -48,3 +48,9 @@ cloud/worker/.wrangler/
 
 # Linux binary built for the cloud VM test
 /cloud/vm/openmessage
+
+# Per-user connector Worker configs (cloud/NEW-USER.md); only the template is tracked.
+cloud/worker/wrangler.*.toml
+!cloud/worker/wrangler.example.toml
+# Google cookies captured for VM pairing (cloud/vm/capture-google-cookies.mjs)
+google-cookies*.json

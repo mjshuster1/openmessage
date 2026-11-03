@@ -31,12 +31,14 @@ the whole test.
 | `openmessage.service` | `serve --web --mcp-sse --mcp-read-only` on 127.0.0.1:7007 (`--web` serves `/api/status` for the status log), sandboxed, restarts on failure. |
 | `om-status-log.sh`, `.service`, `.timer` | Every 5 minutes, one line of `/api/status` (connected, state, block reason) to `/var/lib/openmessage/test-status.jsonl`. |
 | `score.sh` | Hours covered, minutes disconnected, park samples, and each down sample. |
+| `capture-google-cookies.mjs` | Runs on your own computer (Node 22+, Chrome). Opens a throwaway Incognito Chrome, you sign in, and it writes the Google cookies pairing needs to a mode-600 JSON file. Prints names only. |
 
 ## Steps
 
-Everything runs in a browser: Google Cloud console, Cloud Shell, and the
-Cloudflare dashboard. The Mac is needed only to quit the app and for the
-Incognito sign-in.
+Steps 1–3 run in a browser: Google Cloud console, Cloud Shell, and the
+Cloudflare dashboard. Steps 4–5 need a computer with Chrome, Node 22+ and the
+gcloud CLI (or Cloud Shell's upload, below), and the phone in hand. Setting
+this up for someone else: start at [`../NEW-USER.md`](../NEW-USER.md).
 
 ### 1. VM (Google Cloud console)
 
@@ -64,44 +66,94 @@ Debian install command and run it in the VM
 (`gcloud compute ssh --zone us-east1-b om-test`). Leave the VPC service alone
 for now.
 
-### 4. Cookies (Mac, Chrome Incognito)
+### 4. Cookies (your computer, throwaway Incognito Chrome)
 
-1. Open an Incognito window and sign in to mjshuster1@gmail.com.
-2. Open `messages.google.com/web`. In DevTools, Network tab, right-click the
-   `config` request and choose Copy, Copy as cURL.
-3. Paste it into a new file `cookies.txt` in Cloud Shell's editor.
-4. Close the Incognito window **without signing out**. Signing out ends the
-   session OpenMessage will hold. That closing the window leaves it valid is an
-   inference; the 72 hours test it.
+The VM needs a Google login that nothing else uses. Two things that don't
+work, both found on 2026-11-03:
 
-### 5. Cutover (at the Pixel)
+- **Cookies from a Chrome profile you keep using.** `pair --google-chrome`
+  from the everyday profile paired fine, then Google returned 401 four
+  minutes later and OpenMessage parked (`google_auth_expired`): Chrome kept
+  refreshing that login and the copy on the VM fell behind.
+- **DevTools' Copy as cURL.** Messages Web no longer makes a `config`
+  request, and the Network panel shows "Provisional headers are shown" with no
+  Cookie header on messages.google.com, so the copy carries no cookies.
 
-1. Mac: stop everything that runs OpenMessage. If the autorun agents are
-   installed (`scripts/mac-autorun/`), run `scripts/mac-autorun/uninstall.sh`;
-   otherwise they restart `serve` within seconds. Also park the app's launchd
-   watchdog and quit the app (runbook, "Parking the launchd watchdog"). Check
-   with `lsof -nP -iTCP:7007 -sTCP:LISTEN` that nothing listens on port 7007.
-2. Cloud Shell:
+What works: [`capture-google-cookies.mjs`](capture-google-cookies.mjs).
+
+```bash
+node cloud/vm/capture-google-cookies.mjs google-cookies.json
+```
+
+1. A separate Chrome window opens, in Incognito with a temporary profile.
+   Sign in with the Google account linked to the phone's Google Messages, and
+   let it continue to `messages.google.com/web`.
+2. Press Enter in the terminal. The script writes the cookies Chrome would send
+   to Messages Web (it checks that `SID`, `SAPISID`, `__Secure-1PSID` and
+   `__Secure-1PSIDTS` are there), closes Chrome **without signing out** and
+   deletes the temporary profile.
+3. Don't sign that login out anywhere afterwards. Signing out ends the
+   session OpenMessage will hold.
+
+`google-cookies.json` is a full Google login: move it straight to the VM
+(step 5) and delete every copy. `.gitignore` covers `google-cookies*.json`.
+
+If Chrome's Application panel lists anything under "Device bound sessions" for
+that window, the cookies are bound to the computer and won't survive on the
+VM; stop and rethink (phase 2, headless Chromium on the VM). On 2026-11-03
+the Incognito window listed none.
+
+### 5. Cutover (at the phone)
+
+1. Stop every other copy of OpenMessage that holds this phone's pairing (a
+   second copy gets the first logged out). For the original Mac: if the
+   autorun agents are installed (`scripts/mac-autorun/`), run
+   `scripts/mac-autorun/uninstall.sh`; otherwise they restart `serve` within
+   seconds. Also park the app's launchd watchdog and quit the app (runbook,
+   "Parking the launchd watchdog"). Check with
+   `lsof -nP -iTCP:7007 -sTCP:LISTEN` that nothing listens on port 7007.
+2. Copy the cookies to the VM and delete the local file. From the computer
+   that captured them (gcloud signed in to the VM's project):
    ```bash
-   gcloud compute scp --zone us-east1-b cookies.txt om-test:/tmp/cookies.txt && rm cookies.txt
-   gcloud compute ssh --zone us-east1-b om-test
+   gcloud compute scp --zone us-east1-b google-cookies.json om-test:/tmp/google-cookies.json && rm google-cookies.json
    ```
-3. In the VM:
+   Without gcloud there: upload the file in Cloud Shell (⋮, Upload), run the
+   same `scp` from Cloud Shell, and delete it on both machines.
+3. In the VM (`gcloud compute ssh --zone us-east1-b om-test`). `pair` refuses
+   while the service holds the session, so stop it first (a no-op on the first
+   pairing):
    ```bash
-   sudo chown openmessage /tmp/cookies.txt
-   sudo -u openmessage OPENMESSAGES_DATA_DIR=/var/lib/openmessage openmessage pair --google-file /tmp/cookies.txt
+   sudo systemctl stop openmessage
+   sudo chown openmessage:openmessage /tmp/google-cookies.json && sudo chmod 600 /tmp/google-cookies.json
+   sudo -u openmessage OPENMESSAGES_DATA_DIR=/var/lib/openmessage openmessage pair --google-file /tmp/google-cookies.json
    ```
-   Tap the matching emoji on the Pixel within 5 minutes. Then:
+   It prints an emoji. Tap the matching one in the phone's "pair another
+   device" prompt within 5 minutes. If you're driving this through a script,
+   keep its output unbuffered (`stdbuf -oL`, `grep --line-buffered`): the
+   emoji line can otherwise sit in a pipe buffer while the 5 minutes run out.
+   A prompt left over from a cancelled attempt won't complete; dismiss it.
+   Then:
    ```bash
-   sudo rm /tmp/cookies.txt
+   sudo rm /tmp/google-cookies.json
    sudo systemctl start openmessage
-   curl -s 127.0.0.1:7007/api/status | jq .google.connected
+   sleep 20; curl -s 127.0.0.1:7007/api/status | jq .google.connected
    ```
-4. Cloudflare, Workers VPC, VPC Services: point the existing service at tunnel
-   `om-vm`, host `127.0.0.1`, port `7007`. If a service can't change tunnels,
-   create a new one, put its id in `cloud/worker/wrangler.toml` and redeploy
-   the Worker.
-5. claude.ai: ask for your last three texts through the connector.
+   Recheck after 10 minutes: a borrowed login shows up as a 401 and a park
+   within minutes (`jq .google.supervisor` shows `blocked`).
+4. Point the connector at the VM. The dashboard can't change an existing VPC
+   service's tunnel (its Edit only changes the host); the CLI can, keeping the
+   service id, so the Worker needs no redeploy:
+   ```bash
+   cd cloud/worker && npx wrangler vpc service get <service-id>    # note port and cert mode
+   npx wrangler tunnel list                                          # om-vm's id
+   npx wrangler vpc service update <service-id> --name <name> --type http \
+     --tunnel-id <om-vm-tunnel-id> --ipv4 127.0.0.1 --http-port 7007 --cert-verification-mode verify_full
+   ```
+   Going back is the same command with the old tunnel id. A new user with no
+   service yet creates one on `om-vm` instead (`../NEW-USER.md`).
+5. claude.ai: ask for your last three texts through the connector. This
+   answers from the VM's store even if Google has since parked, so check step
+   3's status too.
 6. Start the clock: clear the samples logged before pairing, which would
    otherwise count as downtime:
    `gcloud compute ssh --zone us-east1-b om-test -- sudo truncate -s0 /var/lib/openmessage/test-status.jsonl`

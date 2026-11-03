@@ -1,0 +1,35 @@
+# Template for a new user's connector Worker. Copy it to
+# wrangler.<you>.toml (ignored by git), fill in the three values marked FILL,
+# and pass the file to every wrangler command:
+#   npx wrangler deploy -c wrangler.<you>.toml
+# wrangler.toml itself is the original owner's live config; don't edit it for
+# someone else's deployment. Steps: ../NEW-USER.md.
+
+# Each user needs a distinct Worker name in their own Cloudflare account; the
+# workers.dev hostname is derived from it and the account's subdomain.
+name = "openmessage-connector"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+# Needed by the OAuth provider for Client ID Metadata Document (CIMD) clients.
+compatibility_flags = ["global_fetch_strictly_public"]
+
+# KV namespace OAUTH_KV: `npx wrangler kv namespace create OAUTH_KV`.
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "FILL-kv-namespace-id"
+
+# Workers VPC Service: host 127.0.0.1, HTTP port 7007, on your tunnel.
+# `npx wrangler vpc service list` shows the id.
+[[vpc_services]]
+binding = "ORIGIN"
+service_id = "FILL-vpc-service-id"
+
+[vars]
+# Public https origin of this Worker, no trailing slash. Must match the
+# redirect URI registered with Google (<PUBLIC_URL>/callback). Deploy once to
+# learn it, then fill it in and deploy again.
+PUBLIC_URL = "https://FILL.workers.dev"
+
+# Secrets (never in this file), each with `npx wrangler secret put NAME -c wrangler.<you>.toml`:
+#   ALLOWED_EMAIL (the one Google account allowed to sign in),
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
