@@ -102,6 +102,9 @@ for now.
    create a new one, put its id in `cloud/worker/wrangler.toml` and redeploy
    the Worker.
 5. claude.ai: ask for your last three texts through the connector.
+6. Start the clock: clear the samples logged before pairing, which would
+   otherwise count as downtime:
+   `gcloud compute ssh --zone us-east1-b om-test -- sudo truncate -s0 /var/lib/openmessage/test-status.jsonl`
 
 ### 6. Watch
 
