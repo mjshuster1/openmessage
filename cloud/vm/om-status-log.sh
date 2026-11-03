@@ -11,3 +11,5 @@ if BODY=$(curl -sf -m 10 http://127.0.0.1:7007/api/status); then
 else
   printf '{"t":"%s","up":false}\n' "$NOW" >> "$LOG"
 fi
+# Push alerts, if configured (om-alert.sh, set-alerts.sh). Never fails the log.
+[ -x /usr/local/bin/om-alert.sh ] && /usr/local/bin/om-alert.sh "$LOG" || true

@@ -25,6 +25,9 @@ install -d -m 700 -o openmessage -g openmessage /var/lib/openmessage
 
 install -m 755 openmessage /usr/local/bin/openmessage
 install -m 755 om-status-log.sh /usr/local/bin/om-status-log.sh
+install -m 755 om-alert.sh /usr/local/bin/om-alert.sh
+# Alert config (set-alerts.sh writes alert.env): root writes, openmessage reads.
+install -d -m 750 -o root -g openmessage /etc/openmessage
 install -m 644 openmessage.service om-status-log.service om-status-log.timer /etc/systemd/system/
 
 systemctl daemon-reload

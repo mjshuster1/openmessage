@@ -50,10 +50,9 @@ be signed in to the **user's** accounts for those steps:
 |---|---|---|
 | GCP project, zone, VM name | `create-vm.sh` options (defaults `om-test`, `us-east1-b`) | step 1 |
 | Tunnel id | VPC service | step 1 |
-| VPC service id | `cloud/worker/wrangler.<user>.toml` | step 3 |
-| KV namespace id | `wrangler.<user>.toml` | step 4 |
-| `PUBLIC_URL` (workers.dev URL) | `wrangler.<user>.toml`; OAuth redirect URI | step 4 |
-| `ALLOWED_EMAIL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Worker secrets | step 4 |
+| VPC service id, KV namespace id, `PUBLIC_URL` | `cloud/worker/wrangler.<user>.toml` (written by `setup-connector.sh`) | step 3 |
+| `ALLOWED_EMAIL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Worker secrets (set by `setup-connector.sh`) | step 3 |
+| ntfy topic | `/etc/openmessage/alert.env` on the VM (set by `set-alerts.sh`) | step 5 |
 
 `cloud/worker/wrangler.toml` is the original owner's live config. Don't edit
 it for anyone else. Copy `wrangler.example.toml` to `wrangler.<user>.toml`
@@ -87,82 +86,84 @@ as Healthy. The manual route is in [`vm/README.md`](vm/README.md) steps 1–3.
 If the phone is already paired to another OpenMessage (a Mac app, an earlier
 VM), stop that copy for good. Two copies log each other out.
 
-### 3. VPC service
+### 3. Connector Worker
 
-Workers VPC, VPC Services: create a service on that tunnel, type HTTP, host
-`127.0.0.1`, HTTP port `7007`. Or from `cloud/worker`:
-
-```bash
-npx wrangler tunnel list
-npx wrangler vpc service create openmessage --type http --tunnel-id <tunnel-id> --ipv4 127.0.0.1 --http-port 7007
-```
-
-Note the service id. The dashboard can't move a service to another tunnel
-later; `npx wrangler vpc service update` can (see `vm/README.md` step 5.4).
-
-### 4. Worker
-
-From `cloud/worker`, with Wrangler signed in to the user's Cloudflare account:
+From `cloud/worker`, with Wrangler signed in to the user's Cloudflare account
+(`npx wrangler login`, then check `npx wrangler whoami`):
 
 ```bash
 npm ci
-cp wrangler.example.toml wrangler.<user>.toml
-npx wrangler kv namespace create OAUTH_KV        # id into wrangler.<user>.toml
-# put the VPC service id from step 3 into wrangler.<user>.toml
-npx wrangler deploy -c wrangler.<user>.toml      # first deploy prints the workers.dev URL
-# set PUBLIC_URL to that URL (no trailing slash) in wrangler.<user>.toml
+./setup-connector.sh --user <short-name> --email <user's google email>
 ```
 
-Google OAuth client, in the user's Google Cloud project (APIs & Services):
-configure the consent screen, then create an OAuth client of type Web
-application with the redirect URI `<PUBLIC_URL>/callback`. Then:
+It finds the tunnel, creates the VPC service and the KV namespace, writes
+`wrangler.<user>.toml`, deploys, learns the workers.dev URL and sets the
+secrets. It stops once to walk you through the one manual step: a Google
+OAuth client (consent screen, then a Web application client with the redirect
+URI it prints). It asks for the client id and secret at hidden prompts. It's
+safe to re-run; it reuses what exists. Cloudflare allows one VPC service per
+`127.0.0.1:<port>` per account, which only matters if the account already has
+one. [`worker/README.md`](worker/README.md) explains the security model.
+
+### 4. Pair
+
+With the user at a computer with Chrome, Node 22+ and gcloud, and the phone
+in hand:
 
 ```bash
-npx wrangler secret put ALLOWED_EMAIL -c wrangler.<user>.toml          # the user's Google email
-npx wrangler secret put GOOGLE_CLIENT_ID -c wrangler.<user>.toml
-npx wrangler secret put GOOGLE_CLIENT_SECRET -c wrangler.<user>.toml
-npx wrangler deploy -c wrangler.<user>.toml
+cloud/vm/reconnect.sh
 ```
 
-Type the secrets at the prompts. Don't pass them as arguments or keep them
-in files. [`worker/README.md`](worker/README.md) explains the security model.
+It opens a throwaway Incognito Chrome. The user signs in there with the
+Google account linked to their Google Messages and presses Enter. The script
+moves the login to the VM (deleting the local copy), pairs, and shows the
+emoji large: the user taps the same one on the phone within 5 minutes. Then
+it starts OpenMessage and watches the connection for 10 minutes. The same
+command reconnects later. Details and the manual route: `vm/README.md`
+steps 4–5.
 
-### 5. Pair
+Don't capture cookies any other way. Cookies from an everyday Chrome profile
+(`pair --google-chrome`) pair fine, then die within minutes on the VM. On
+Windows, Chrome may bind cookies to the computer ("Device bound sessions" in
+DevTools' Application panel); if pairing works but drops within minutes,
+that's the likely cause.
 
-[`vm/README.md`](vm/README.md) steps 4 and 5.2–5.3, with the user at the
-phone:
+### 5. Alerts
 
-1. `node cloud/vm/capture-google-cookies.mjs google-cookies.json` on a
-   computer with Chrome. The user signs in to the throwaway Incognito window
-   themselves, with the Google account linked to their Google Messages.
-2. Copy the file to the VM, delete it locally, run `pair --google-file` on the
-   VM, and the user taps the emoji on the phone within 5 minutes.
-3. Start the service and check `jq .google.connected` right away and again
-   after 10 minutes.
+```bash
+cloud/vm/set-alerts.sh
+```
 
-Use only this capture method. Cookies from an everyday Chrome profile
-(`pair --google-chrome`) pair fine, then die within minutes on the VM.
+It turns on push notifications through ntfy and sends a test one. The user
+installs the ntfy app and subscribes to the printed topic (keep it private).
+They get "disconnected" after 10 minutes down, "needs reconnecting" at once
+on a park, and "back online" on recovery. Status only, never message text.
 
 ### 6. Connect claude.ai
 
 In the user's claude.ai: add a custom connector with the URL
-`<PUBLIC_URL>/mcp` and sign in with the allowed Google account. Check:
+`<PUBLIC_URL>/mcp` and sign in with the allowed Google account. Then create
+the **Texts** Project with the instructions in
+[`CLAUDE-PROJECT.md`](CLAUDE-PROJECT.md). Check:
 
-- Asking for the last three texts works.
+- Asking for the last three texts works, and the answer starts with a sync
+  line.
 - `tools/list` shows only the read tools, and asking Claude to send a text
   fails.
 
-### 7. Run it
+Give the user [`USER-GUIDE.md`](USER-GUIDE.md).
 
-- The status log on the VM records Google's state every 5 minutes. Before
-  trusting it, clear it once (`vm/README.md` step 5.6). Then
-  `gcloud compute ssh om-test --zone us-east1-b -- sudo om-score` summarizes
-  uptime (`om-score` is installed by `create-vm.sh`; a hand-built VM has
-  `vm/score.sh`).
-- If Google parks (`jq .google.supervisor` shows `blocked`), repeat step 5.
-  Don't restart the service in a loop: repeated reconnects can get the
-  account throttled.
-- Watch the user's Gmail for Google security alerts about the new sign-in.
+### 7. Run it, and hand over
+
+- `gcloud compute ssh om-test --zone us-east1-b -- sudo om-score` summarizes
+  uptime from the 5-minute status log. Clear the log once after pairing
+  (`vm/README.md` step 5.6) so setup time doesn't count.
+- If Google parks, the user gets an alert; run `reconnect.sh` once. Don't
+  loop it: repeated reconnects can get the account throttled.
+- If you set this up from your own machine: remove your SSH key from the
+  user's project (`gcloud compute project-info describe` shows `ssh-keys`;
+  remove yours in the console under Compute Engine, Metadata, SSH keys), sign
+  gcloud and Wrangler out of the user's accounts, and delete any cookie file.
 
 ## Things that cost time on 2026-11-03
 

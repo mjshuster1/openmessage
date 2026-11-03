@@ -113,7 +113,8 @@ fi
 cat <<EOF
 
 Done: $NAME is installed; OpenMessage is enabled but not started (no pairing yet).
-Next: pair it with the phone (cloud/vm/README.md steps 4-5), then point a VPC
-service at its tunnel (cloud/NEW-USER.md step 3).
+Next, with the phone in hand:  cloud/vm/reconnect.sh --name $NAME --zone $ZONE
+Then alerts:                   cloud/vm/set-alerts.sh --name $NAME --zone $ZONE
+Connector Worker:              cloud/worker/setup-connector.sh (cloud/NEW-USER.md step 3)
 Check later:  gcloud compute ssh $NAME --zone $ZONE -- sudo om-score
 EOF

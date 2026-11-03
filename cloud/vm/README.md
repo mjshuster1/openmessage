@@ -30,11 +30,28 @@ the whole test.
 | `create-vm.sh` | One command for steps 1–3: creates the VM with `startup.sh`, waits until it has installed a release, then installs the tunnel from a token typed at a hidden prompt. |
 | `startup.sh` | GCE startup script: downloads the release named in metadata, checks it against `SHA256SUMS`, runs `setup-vm.sh`. Upgrades in place when `om-release` changes. |
 | `release-vm.sh` | Builds the Linux binaries and the VM bundle from HEAD and publishes them as a GitHub release (the fork's Actions don't run). |
+| `reconnect.sh` | Pairs or re-pairs in one command from your computer: capture, copy, pair with a large emoji prompt, start, watch for 10 minutes. See "Reconnect". |
+| `om-alert.sh`, `set-alerts.sh` | Push alerts through ntfy when Google disconnects (after 10 minutes), parks (at once) or comes back. `set-alerts.sh` turns them on for a VM and sends a test. |
 | `setup-vm.sh` | One-time root setup: curl and jq, 1 GB swap, `openmessage` system user, data dir `/var/lib/openmessage` (mode 700), binary, units. Enables but does not start OpenMessage. |
 | `openmessage.service` | `serve --web --mcp-sse --mcp-read-only` on 127.0.0.1:7007 (`--web` serves `/api/status` for the status log), sandboxed, restarts on failure. |
 | `om-status-log.sh`, `.service`, `.timer` | Every 5 minutes, one line of `/api/status` (connected, state, block reason) to `/var/lib/openmessage/test-status.jsonl`. |
 | `score.sh` | Hours covered, minutes disconnected, park samples, and each down sample. |
 | `capture-google-cookies.mjs` | Runs on your own computer (Node 22+, Chrome). Opens a throwaway Incognito Chrome, you sign in, and it writes the Google cookies pairing needs to a mode-600 JSON file. Prints names only. |
+
+## Reconnect
+
+When an alert says "needs reconnecting", or Claude's answers start with a
+WARNING, from the repo on a computer with Chrome, Node 22+ and gcloud, phone
+in hand:
+
+```bash
+cloud/vm/reconnect.sh            # --name/--zone/--project if not om-test in us-east1-b
+```
+
+Run it once. If it fails twice, stop and look (`jq .google.supervisor` on the
+VM, and the Google account's security alerts) instead of looping: repeated
+pairings can get the account throttled. It's steps 4 and 5.2–5.3 below in one
+command.
 
 ## Steps
 
