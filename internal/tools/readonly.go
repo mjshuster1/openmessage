@@ -10,6 +10,22 @@ package tools
 //
 // Keep ReadOnlyTools in sync with cloud/worker/readonly-tools.json (the
 // Worker's filter); readonly_test.go fails if they differ.
+//
+// ApplyReadOnlySurface (readonly_wrap.go) also wraps the kept tools:
+//
+//   - Freshness line: every kept tool except get_status starts its result
+//     with one line saying how recent the stored texts are and whether Google
+//     Messages is connected, or a WARNING when it is disconnected, parked
+//     (supervisor "blocked"), or needs pairing, so a model does not present
+//     stale texts as current. The state is read in-process (app.GoogleStatus,
+//     the same snapshot /api/status serves) or, in MCP client mode, from the
+//     daemon's /api/status. A lookup that fails drops its half of the line;
+//     it never fails the tool call.
+//   - One-time-code redaction (readonly_redact.go): 4-8 digit codes near
+//     words like "code", "verification", "OTP", "PIN", "sign in" or "is
+//     your" are replaced with "[code hidden]" in text and structured
+//     results, since a prompt-injected model could exfiltrate them. Set
+//     OPENMESSAGES_MCP_SHOW_CODES=1 to turn redaction off.
 
 import (
 	"sort"

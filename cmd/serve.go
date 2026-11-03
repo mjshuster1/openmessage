@@ -674,13 +674,14 @@ func RunServe(logger zerolog.Logger, args ...string) error {
 	if dependencies := mcpV2Dependencies(v2SendStack); len(dependencies) > 0 {
 		mcpV2 = dependencies[0]
 	}
-	tools.RegisterWithOptions(mcpSrv, a, tools.Options{
+	mcpOptions := tools.Options{
 		Reads:     reads,
 		V2Primary: v2Primary,
 		V2:        mcpV2,
-	})
+	}
+	tools.RegisterWithOptions(mcpSrv, a, mcpOptions)
 	if opts.mcpReadOnly {
-		logger.Info().Strs("removed", tools.ApplyReadOnly(mcpSrv)).Msg("MCP read-only: write tools removed")
+		logger.Info().Strs("removed", tools.ApplyReadOnlySurface(mcpSrv, a, mcpOptions)).Msg("MCP read-only: write tools removed")
 	}
 
 	var mcpHTTPHandler http.Handler
@@ -954,13 +955,14 @@ func runServeMCPClient(logger zerolog.Logger, opts serveOptions) error {
 		buildVersion,
 		mcpserver.WithToolCapabilities(true),
 	)
-	tools.RegisterWithOptions(mcpSrv, a, tools.Options{
+	mcpOptions := tools.Options{
 		Reads:     reads,
 		V2Primary: v2Primary,
 		Daemon:    daemon,
-	})
+	}
+	tools.RegisterWithOptions(mcpSrv, a, mcpOptions)
 	if opts.mcpReadOnly {
-		logger.Info().Strs("removed", tools.ApplyReadOnly(mcpSrv)).Msg("MCP read-only: write tools removed")
+		logger.Info().Strs("removed", tools.ApplyReadOnlySurface(mcpSrv, a, mcpOptions)).Msg("MCP read-only: write tools removed")
 	}
 
 	logger.Info().
