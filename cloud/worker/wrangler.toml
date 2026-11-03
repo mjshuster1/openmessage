@@ -9,8 +9,10 @@ compatibility_flags = ["global_fetch_strictly_public"]
 binding = "OAUTH_KV"
 id = "0d26552528104d9f82e683197fc48c47"
 
-# Workers VPC Service: the Cloudflare Tunnel on the Mac, host 127.0.0.1,
-# HTTP port 7007.
+# Workers VPC Service: host 127.0.0.1, HTTP port 7007, through tunnel om-vm
+# (bcb82990-...) on the GCE VM since 2026-11-03. Back to the Mac: run
+# `wrangler vpc service update` with --tunnel-id ffa24fcf-f72b-49ab-8844-78c85a4f2460
+# (openmessage-mac). The dashboard can't change a service's tunnel.
 [[vpc_services]]
 binding = "ORIGIN"
 service_id = "01a198d3-3711-7ab0-9961-1fafca289cac"
