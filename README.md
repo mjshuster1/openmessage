@@ -40,8 +40,22 @@ It adds a spam rules watcher, kept in new files so upstream merges stay small:
   second read-only filter. Its tool list, `cloud/worker/readonly-tools.json`,
   is checked against the Go list by `internal/tools/readonly_test.go`.
   Deployed 2026-11-02 at `openmessage-connector.mjshuster1.workers.dev`; see `cloud/worker/README.md`.
+- `openmessage spam-scan [--days N] [--block] [--max N]` checks stored
+  history against the same rules through the running app (local endpoint
+  `POST /api/spam/scan`, same guards as spam-block) and lists matching
+  threads; `--block` block-and-reports the blockable ones, one at a time,
+  25 per run by default.
+- `scripts/mac-autorun/`: `install.sh` runs `serve --web --mcp-sse
+  --mcp-read-only` as a user launchd agent (starts at login, restarts on
+  crash) and adds a second agent that runs `update.sh` every 30 minutes:
+  fast-forward to this fork's `main`, build, run the spamwatch and tools
+  tests, then restart. On failure the running binary stays. Upstream is never
+  pulled. Stop it with `uninstall.sh`, or restart by hand with
+  `launchctl kickstart -k gui/$(id -u)/com.mjshuster.openmessage.serve`.
+  Logs: `~/Library/Logs/openmessage/`. The agents need a logged-in user, so
+  after a reboot nothing runs until login (automatic login needs FileVault off).
 - Upstream files touched: `cmd/serve.go` (hook, blocker, endpoint, the
-  `--mcp-read-only` flag), `main.go` (two commands, one help line),
+  `--mcp-read-only` flag), `main.go` (three commands, help lines),
   `.gitignore` and `.vercelignore`. New files in upstream packages:
   `internal/app/spam_block.go`, `internal/tools/readonly.go`.
 

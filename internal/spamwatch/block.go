@@ -210,43 +210,69 @@ func (w *Watcher) Manual(conversationID, action string) error {
 	return err
 }
 
-// WrapHTTP serves BlockPath itself and passes every other request to next.
-// The endpoint needs the control token as a Bearer header (no cookie), a
-// loopback client and no browser Origin, so a web page cannot trigger it.
-// An empty token disables the endpoint.
+// WrapHTTP serves BlockPath and ScanPath itself and passes every other
+// request to next. Both endpoints need the control token as a Bearer header
+// (no cookie), a loopback client and no browser Origin, so a web page cannot
+// trigger them. An empty token disables them.
 func (w *Watcher) WrapHTTP(next http.Handler, token string) http.Handler {
 	token = strings.TrimSpace(token)
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != BlockPath {
+		if r.URL.Path != BlockPath && r.URL.Path != ScanPath {
 			next.ServeHTTP(rw, r)
 			return
 		}
-		reply := func(status int, resp BlockResponse) {
+		reply := func(status int, resp any) {
 			rw.Header().Set("Content-Type", "application/json")
 			rw.WriteHeader(status)
 			_ = json.NewEncoder(rw).Encode(resp)
 		}
+		fail := func(status int, msg string) {
+			if r.URL.Path == ScanPath {
+				reply(status, ScanResponse{Error: msg})
+			} else {
+				reply(status, BlockResponse{Error: msg})
+			}
+		}
 		if r.Method != http.MethodPost {
-			reply(http.StatusMethodNotAllowed, BlockResponse{Error: "POST only"})
+			fail(http.StatusMethodNotAllowed, "POST only")
 			return
 		}
 		if token == "" {
-			reply(http.StatusServiceUnavailable, BlockResponse{Error: "control token not available"})
+			fail(http.StatusServiceUnavailable, "control token not available")
 			return
 		}
 		if !loopbackClient(r) || r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" {
-			reply(http.StatusForbidden, BlockResponse{Error: "local command-line requests only"})
+			fail(http.StatusForbidden, "local command-line requests only")
 			return
 		}
 		auth := strings.Fields(r.Header.Get("Authorization"))
 		if len(auth) != 2 || !strings.EqualFold(auth[0], "Bearer") ||
 			subtle.ConstantTimeCompare([]byte(auth[1]), []byte(token)) != 1 {
-			reply(http.StatusUnauthorized, BlockResponse{Error: "missing or wrong control token"})
+			fail(http.StatusUnauthorized, "missing or wrong control token")
 			return
 		}
+
+		if r.URL.Path == ScanPath {
+			var req ScanRequest
+			if err := json.NewDecoder(http.MaxBytesReader(rw, r.Body, 4096)).Decode(&req); err != nil {
+				fail(http.StatusBadRequest, "invalid JSON")
+				return
+			}
+			scanned, cands, err := w.Scan(req.Days)
+			if err != nil {
+				fail(http.StatusInternalServerError, err.Error())
+				return
+			}
+			if cands == nil {
+				cands = []ScanCandidate{}
+			}
+			reply(http.StatusOK, ScanResponse{OK: true, Scanned: scanned, Candidates: cands})
+			return
+		}
+
 		var req BlockRequest
 		if err := json.NewDecoder(http.MaxBytesReader(rw, r.Body, 4096)).Decode(&req); err != nil {
-			reply(http.StatusBadRequest, BlockResponse{Error: "invalid JSON"})
+			fail(http.StatusBadRequest, "invalid JSON")
 			return
 		}
 		if err := w.Manual(req.ConversationID, req.Action); err != nil {

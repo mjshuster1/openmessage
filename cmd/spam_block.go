@@ -38,31 +38,8 @@ func RunSpamBlock(args []string) error {
 		return fmt.Errorf("usage: openmessage spam-block <conversation_id> [--no-report] [--unblock]")
 	}
 
-	token := localapi.LoadControlToken(app.DefaultDataDir())
-	if token == "" {
-		return fmt.Errorf("no control token found; is `openmessage serve` running with this data dir?")
-	}
-	body, _ := json.Marshal(spamwatch.BlockRequest{ConversationID: positional[0], Action: action})
-	req, err := http.NewRequest(http.MethodPost, localapi.DefaultBaseURL()+spamwatch.BlockPath, bytes.NewReader(body))
-	if err != nil {
+	if err := spamBlockOne(positional[0], action); err != nil {
 		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := (&http.Client{Timeout: 45 * time.Second}).Do(req)
-	if err != nil {
-		return fmt.Errorf("could not reach the running app (is `openmessage serve` running?): %w", err)
-	}
-	defer resp.Body.Close()
-	var out spamwatch.BlockResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		if resp.StatusCode == http.StatusNotFound {
-			return fmt.Errorf("the running app has no spam-block endpoint; restart it with the new build")
-		}
-		return fmt.Errorf("unexpected reply from app (HTTP %d)", resp.StatusCode)
-	}
-	if !out.OK {
-		return fmt.Errorf("%s failed: %s", action, out.Error)
 	}
 	switch action {
 	case spamwatch.ActionUnblock:
@@ -73,4 +50,45 @@ func RunSpamBlock(args []string) error {
 		fmt.Println("Blocked and reported as spam. Check the phone's Spam & blocked list to confirm.")
 	}
 	return nil
+}
+
+// spamBlockOne sends one block request to the running app.
+func spamBlockOne(conversationID, action string) error {
+	var out spamwatch.BlockResponse
+	status, err := postSpamAPI(spamwatch.BlockPath, spamwatch.BlockRequest{ConversationID: conversationID, Action: action}, &out, 45*time.Second)
+	if err != nil {
+		if status == http.StatusNotFound {
+			return fmt.Errorf("the running app has no spam-block endpoint; restart it with the new build")
+		}
+		return err
+	}
+	if !out.OK {
+		return fmt.Errorf("%s failed: %s", action, out.Error)
+	}
+	return nil
+}
+
+// postSpamAPI posts JSON to a spam endpoint of the running app and decodes
+// the reply. It returns the HTTP status (0 if the app was not reached).
+func postSpamAPI(path string, in, out any, timeout time.Duration) (int, error) {
+	token := localapi.LoadControlToken(app.DefaultDataDir())
+	if token == "" {
+		return 0, fmt.Errorf("no control token found; is `openmessage serve` running with this data dir?")
+	}
+	body, _ := json.Marshal(in)
+	req, err := http.NewRequest(http.MethodPost, localapi.DefaultBaseURL()+path, bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("could not reach the running app (is `openmessage serve` running?): %w", err)
+	}
+	defer resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return resp.StatusCode, fmt.Errorf("unexpected reply from app (HTTP %d)", resp.StatusCode)
+	}
+	return resp.StatusCode, nil
 }
