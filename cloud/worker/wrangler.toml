@@ -18,7 +18,7 @@ service_id = "01a198d3-3711-7ab0-9961-1fafca289cac"
 [vars]
 # Public https origin of this Worker, no trailing slash. Must match the
 # redirect URI registered with Google (<PUBLIC_URL>/callback).
-PUBLIC_URL = "https://REPLACE-worker-hostname"
+PUBLIC_URL = "https://openmessage-connector.mjshuster1.workers.dev"
 
 # Secrets (set in the dashboard or with `wrangler secret put`, never in this file):
 #   ALLOWED_EMAIL (the one Google account allowed to sign in; a secret so it
