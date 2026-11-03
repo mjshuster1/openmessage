@@ -21,7 +21,8 @@ detailed commands are in [`vm/README.md`](vm/README.md) (VM, pairing) and
   account pairing uses is the one linked in Google Messages (Settings, Device
   pairing). iPhone won't work.
 - A **Google Cloud** project with billing turned on (needed even for the free
-  tier). Check cloud.google.com/free for what's free.
+  tier). The e2-micro and its disk are free in us-east1, us-central1 and
+  us-west1. The external IPv4 address costs about $3.65/month.
 - A **Cloudflare** account (Workers VPC is free during its beta).
 - A **claude.ai** account that can add custom connectors.
 - About an hour at a computer with Chrome and Node 22+, with the phone in hand
@@ -47,12 +48,12 @@ be signed in to the **user's** accounts for those steps:
 
 | Value | Where it goes | From |
 |---|---|---|
-| GCP project, zone, VM name | the `gcloud` commands (examples use `om-test`, `us-east1-b`) | step 1 |
-| Tunnel id | VPC service | step 3 |
-| VPC service id | `cloud/worker/wrangler.<user>.toml` | step 4 |
-| KV namespace id | `wrangler.<user>.toml` | step 5 |
-| `PUBLIC_URL` (workers.dev URL) | `wrangler.<user>.toml`; OAuth redirect URI | step 5 |
-| `ALLOWED_EMAIL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Worker secrets | step 5 |
+| GCP project, zone, VM name | `create-vm.sh` options (defaults `om-test`, `us-east1-b`) | step 1 |
+| Tunnel id | VPC service | step 1 |
+| VPC service id | `cloud/worker/wrangler.<user>.toml` | step 3 |
+| KV namespace id | `wrangler.<user>.toml` | step 4 |
+| `PUBLIC_URL` (workers.dev URL) | `wrangler.<user>.toml`; OAuth redirect URI | step 4 |
+| `ALLOWED_EMAIL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Worker secrets | step 4 |
 
 `cloud/worker/wrangler.toml` is the original owner's live config. Don't edit
 it for anyone else. Copy `wrangler.example.toml` to `wrangler.<user>.toml`
@@ -61,28 +62,32 @@ command.
 
 ## Steps
 
-### 1. VM
+### 1. VM and tunnel
 
-[`vm/README.md`](vm/README.md) steps 1–2, in the user's project: an e2-micro,
-Debian 12, 30 GB standard disk, no HTTP/HTTPS firewall rules, then build the
-Linux binary in Cloud Shell and run `setup-vm.sh`. The binary should come from
-current `main`: the service unit there already has `--web`, which the status
-log needs.
+First create the tunnel in the user's Cloudflare account (Workers VPC,
+Tunnels, no public hostname) and keep its install page open. Then, in the
+user's Cloud Shell (it has gcloud, signed in as them):
+
+```bash
+git clone https://github.com/mjshuster1/openmessage && cd openmessage
+gcloud config set project <their project>
+cloud/vm/create-vm.sh --release <tag>
+```
+
+`<tag>` is the newest release on the fork (`gh release list --repo
+mjshuster1/openmessage`; publish one with `cloud/vm/release-vm.sh` if `main`
+has moved on). The script creates the e2-micro, installs the release after
+checking its checksums, then asks for the tunnel token: paste the long string
+after `service install` from the tunnel's install command. Input is hidden and
+the token goes straight to the VM. The dashboard should then show the tunnel
+as Healthy. The manual route is in [`vm/README.md`](vm/README.md) steps 1–3.
 
 ### 2. Make sure no other copy holds the phone
 
 If the phone is already paired to another OpenMessage (a Mac app, an earlier
 VM), stop that copy for good. Two copies log each other out.
 
-### 3. Tunnel
-
-[`vm/README.md`](vm/README.md) step 3, in the user's Cloudflare account:
-Workers VPC, Tunnels, create one (e.g. `om-vm`) with no public hostname, and
-run its Debian install command on the VM. The tunnel token in that command is
-a secret: paste it into the VM's shell, not into chat or a file in the repo.
-The dashboard should show the tunnel as Healthy.
-
-### 4. VPC service
+### 3. VPC service
 
 Workers VPC, VPC Services: create a service on that tunnel, type HTTP, host
 `127.0.0.1`, HTTP port `7007`. Or from `cloud/worker`:
@@ -95,7 +100,7 @@ npx wrangler vpc service create openmessage --type http --tunnel-id <tunnel-id> 
 Note the service id. The dashboard can't move a service to another tunnel
 later; `npx wrangler vpc service update` can (see `vm/README.md` step 5.4).
 
-### 5. Worker
+### 4. Worker
 
 From `cloud/worker`, with Wrangler signed in to the user's Cloudflare account:
 
@@ -103,7 +108,7 @@ From `cloud/worker`, with Wrangler signed in to the user's Cloudflare account:
 npm ci
 cp wrangler.example.toml wrangler.<user>.toml
 npx wrangler kv namespace create OAUTH_KV        # id into wrangler.<user>.toml
-# put the VPC service id from step 4 into wrangler.<user>.toml
+# put the VPC service id from step 3 into wrangler.<user>.toml
 npx wrangler deploy -c wrangler.<user>.toml      # first deploy prints the workers.dev URL
 # set PUBLIC_URL to that URL (no trailing slash) in wrangler.<user>.toml
 ```
@@ -122,7 +127,7 @@ npx wrangler deploy -c wrangler.<user>.toml
 Type the secrets at the prompts. Don't pass them as arguments or keep them
 in files. [`worker/README.md`](worker/README.md) explains the security model.
 
-### 6. Pair
+### 5. Pair
 
 [`vm/README.md`](vm/README.md) steps 4 and 5.2–5.3, with the user at the
 phone:
@@ -138,7 +143,7 @@ phone:
 Use only this capture method. Cookies from an everyday Chrome profile
 (`pair --google-chrome`) pair fine, then die within minutes on the VM.
 
-### 7. Connect claude.ai
+### 6. Connect claude.ai
 
 In the user's claude.ai: add a custom connector with the URL
 `<PUBLIC_URL>/mcp` and sign in with the allowed Google account. Check:
@@ -147,12 +152,14 @@ In the user's claude.ai: add a custom connector with the URL
 - `tools/list` shows only the read tools, and asking Claude to send a text
   fails.
 
-### 8. Run it
+### 7. Run it
 
 - The status log on the VM records Google's state every 5 minutes. Before
   trusting it, clear it once (`vm/README.md` step 5.6). Then
-  `sudo sh vm/score.sh` on the VM summarizes uptime.
-- If Google parks (`jq .google.supervisor` shows `blocked`), repeat step 6.
+  `gcloud compute ssh om-test --zone us-east1-b -- sudo om-score` summarizes
+  uptime (`om-score` is installed by `create-vm.sh`; a hand-built VM has
+  `vm/score.sh`).
+- If Google parks (`jq .google.supervisor` shows `blocked`), repeat step 5.
   Don't restart the service in a loop: repeated reconnects can get the
   account throttled.
 - Watch the user's Gmail for Google security alerts about the new sign-in.

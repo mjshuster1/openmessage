@@ -27,6 +27,9 @@ the whole test.
 
 | File | What it does |
 |---|---|
+| `create-vm.sh` | One command for steps 1–3: creates the VM with `startup.sh`, waits until it has installed a release, then installs the tunnel from a token typed at a hidden prompt. |
+| `startup.sh` | GCE startup script: downloads the release named in metadata, checks it against `SHA256SUMS`, runs `setup-vm.sh`. Upgrades in place when `om-release` changes. |
+| `release-vm.sh` | Builds the Linux binaries and the VM bundle from HEAD and publishes them as a GitHub release (the fork's Actions don't run). |
 | `setup-vm.sh` | One-time root setup: curl and jq, 1 GB swap, `openmessage` system user, data dir `/var/lib/openmessage` (mode 700), binary, units. Enables but does not start OpenMessage. |
 | `openmessage.service` | `serve --web --mcp-sse --mcp-read-only` on 127.0.0.1:7007 (`--web` serves `/api/status` for the status log), sandboxed, restarts on failure. |
 | `om-status-log.sh`, `.service`, `.timer` | Every 5 minutes, one line of `/api/status` (connected, state, block reason) to `/var/lib/openmessage/test-status.jsonl`. |
@@ -40,6 +43,24 @@ Cloudflare dashboard. Steps 4–5 need a computer with Chrome, Node 22+ and the
 gcloud CLI (or Cloud Shell's upload, below), and the phone in hand. Setting
 this up for someone else: start at [`../NEW-USER.md`](../NEW-USER.md).
 
+### Steps 1–3 in one command
+
+With a release published (`cloud/vm/release-vm.sh <tag>`, needs `gh`), from
+Cloud Shell or any machine with gcloud signed in to the project:
+
+```bash
+cloud/vm/create-vm.sh --release <tag>          # --name, --zone, --project to change defaults
+```
+
+It creates the VM (as in step 1), installs the release with checksums checked
+(step 2), and asks for the Cloudflare tunnel token at a hidden prompt (step 3:
+create the tunnel in the dashboard first, then paste the token from its install
+command). Then continue at step 4. Upgrading later:
+`gcloud compute instances add-metadata <vm> --zone <zone> --metadata om-release=<tag>`
+and reboot the VM; OpenMessage restarts on the new binary if it was running.
+
+The manual route, for reference:
+
 ### 1. VM (Google Cloud console)
 
 1. Create project `openmessage-test` under mjshuster1@gmail.com and turn on
@@ -47,8 +68,10 @@ this up for someone else: start at [`../NEW-USER.md`](../NEW-USER.md).
    the free-tier terms below come from third-party guides.
 2. Compute Engine, Create instance: name `om-test`, region `us-east1`, zone
    `us-east1-b`, machine `e2-micro`, Debian 12, 30 GB **standard** persistent
-   disk. Leave the HTTP and HTTPS firewall boxes off. Whether the external IPv4
-   address is billed is not confirmed; it is needed for outbound traffic.
+   disk. Leave the HTTP and HTTPS firewall boxes off. The external IPv4 address
+   is billed even on the free e2-micro: Google's network pricing lists in-use
+   IPv4 on standard VMs at $0.005/hour, about $3.65/month. It's needed for
+   outbound traffic (an IPv6-only VM is free but can't reach github.com).
 
 ### 2. Build and install (Cloud Shell)
 
