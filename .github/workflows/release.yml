@@ -189,6 +189,8 @@ jobs:
           cp artifacts/openmessage-linux-arm64/openmessage-linux-arm64.tar.gz release/
           cp artifacts/openmessage-linux-amd64/openmessage-linux-amd64.tar.gz release/
           cp artifacts/OpenMessage-dmg/OpenMessage.dmg release/
+          # VM units and scripts for cloud/vm/startup.sh (tracked files only).
+          git archive --format=tar --prefix=vm/ "${{ steps.tag.outputs.tag }}:cloud/vm" | gzip -n > release/openmessage-vm.tar.gz
 
           # Generate SHA256 checksums for verification + Homebrew updates
           (cd release && shasum -a 256 * > SHA256SUMS)
