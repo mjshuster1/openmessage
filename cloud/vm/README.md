@@ -32,6 +32,7 @@ the whole test.
 | `startup.sh` | GCE startup script: downloads the release named in metadata (`latest` = newest `*-vmN`, first boot only), checks it against `SHA256SUMS`, runs `setup-vm.sh`. Upgrades in place when `om-release` changes to another tag. Installed as `/usr/local/sbin/om-install-release` for `om-update.sh`. |
 | `om-update.sh`, `.service`, `.timer` | Daily (04:00–05:00 VM time) when `om-release=latest` and `om-auto-update` isn't `no`: installs a newer `*-vmN` release, and if Google Messages was connected and doesn't reconnect within 5 minutes, puts the old binary back, skips that release and sends an alert. |
 | `om-weekly.sh`, `.service`, `.timer` | Sundays 18:00: an ntfy notice with the week's uptime and how many texts synced ("all good this week", or a weekly check if not). Needs alerts on. |
+| `../teardown.sh` | Removes one person's setup: VM, connector Worker, VPC service, KV namespace, tunnel (kept if another service uses it), local records; optionally the project. Lists first, asks you to type the name. |
 | `release-vm.sh` | Builds the Linux binaries and the VM bundle from HEAD and publishes them as a GitHub release (the fork's Actions don't run). |
 | `reconnect.sh` | Pairs or re-pairs in one command from your computer: capture, copy, pair with a large emoji prompt, start, watch for 10 minutes. See "Reconnect". |
 | `om-alert.sh`, `set-alerts.sh` | Push alerts through ntfy when Google disconnects (after 10 minutes), parks (at once) or comes back. `set-alerts.sh` turns them on for a VM and sends a test. |

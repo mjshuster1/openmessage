@@ -69,6 +69,13 @@ anything wrong. VMs created with the default `--release latest` update
 themselves daily and roll back an update that breaks the Google connection
 (`vm/om-update.sh`), so there is no per-person upgrade chore.
 
+**Removing someone:** `cloud/teardown.sh --user <short-name>` lists what it
+will delete (VM, connector Worker, its VPC service and KV namespace, the
+tunnel unless another service still uses it, and the local records), asks you
+to type the name, deletes it all, then prints what's left to do by hand (the
+claude.ai connector, an Access app, the OAuth client). `--dry-run` only lists;
+`--delete-project` also deletes their Google Cloud project.
+
 ## Per-user values
 
 | Value | Where it goes | From |
