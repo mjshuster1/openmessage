@@ -20,6 +20,8 @@
 # Cloudflare account. It then lists what to remove by hand (the claude.ai
 # connector, a Cloudflare Access app, the ntfy subscription).
 # --tunnel deletes that tunnel even without a Worker config (same in-use check).
+# It keeps a Worker, VPC service or KV namespace that another wrangler*.toml in
+# cloud/worker still uses (it can only see those configs).
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -34,7 +36,7 @@ while [ $# -gt 0 ]; do
     --delete-project) DELETE_PROJECT=yes; shift ;;
     --dry-run) DRY=yes; shift ;;
     --yes) YES=yes; shift ;;
-    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -107,6 +109,29 @@ if [ -n "$WORKER$TUNNEL" ]; then
   [ -z "$KV_ID" ] || W kv namespace list 2>/dev/null | grep -q "\"$KV_ID\"" || KV_ID=
 fi
 
+# Never delete what another Worker config here still uses (a test Worker can
+# point at a live VPC service). Cloudflare can't say which Workers bind a
+# service, so this only sees configs in cloud/worker.
+KEEP=()
+users_of() { # $1 = line pattern; prints the other configs that match, comma-separated
+  local f hits=()
+  for f in "$WDIR"/wrangler*.toml; do
+    [ -f "$f" ] && [ "$f" != "$CFG" ] && [ "$f" != "$WDIR/wrangler.example.toml" ] || continue
+    grep -qE "$1" "$f" && hits+=("$(basename "$f")")
+  done
+  [ ${#hits[@]} -eq 0 ] || (IFS=,; echo "${hits[*]}")
+}
+if [ -n "${WORKER:-}" ] && [ "${WORKER_EXISTS:-no}" = yes ] && u=$(users_of "^name = \"$WORKER\"") && [ -n "$u" ]; then
+  KEEP+=("Worker $WORKER ($u deploys it too)"); WORKER_EXISTS=no
+fi
+if [ -n "$VPC_ID" ] && u=$(users_of "service_id = \"$VPC_ID\"") && [ -n "$u" ]; then
+  KEEP+=("VPC service $VPC_ID ($u uses it too)"); VPC_ID=
+  [ -z "${TUNNEL_ID:-}" ] || TUNNEL_SHARED=${TUNNEL_SHARED:-"the VPC service kept above"}
+fi
+if [ -n "$KV_ID" ] && u=$(users_of "^id = \"$KV_ID\"") && [ -n "$u" ]; then
+  KEEP+=("KV namespace $KV_ID ($u uses it too)"); KV_ID=
+fi
+
 # --- plan ------------------------------------------------------------------
 echo
 echo "This will delete:"
@@ -128,6 +153,7 @@ if [ "$CF" = yes ]; then
       item "Cloudflare tunnel $TUNNEL_NAME ($TUNNEL_ID)"
     fi
   fi
+  for k in ${KEEP[@]+"${KEEP[@]}"}; do echo "  (keeping $k)"; done
   echo "  Cloudflare account: $CF_ACCT"
 fi
 local_files=()
