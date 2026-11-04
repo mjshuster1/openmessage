@@ -26,12 +26,18 @@ install -d -m 700 -o openmessage -g openmessage /var/lib/openmessage
 install -m 755 openmessage /usr/local/bin/openmessage
 install -m 755 om-status-log.sh /usr/local/bin/om-status-log.sh
 install -m 755 om-alert.sh /usr/local/bin/om-alert.sh
+install -m 755 om-weekly.sh /usr/local/bin/om-weekly.sh
+install -m 755 om-update.sh /usr/local/sbin/om-update
+install -m 755 startup.sh /usr/local/sbin/om-install-release
 # Alert config (set-alerts.sh writes alert.env): root writes, openmessage reads.
 install -d -m 750 -o root -g openmessage /etc/openmessage
-install -m 644 openmessage.service om-status-log.service om-status-log.timer /etc/systemd/system/
+install -m 644 openmessage.service om-status-log.service om-status-log.timer \
+  om-update.service om-update.timer om-weekly.service om-weekly.timer /etc/systemd/system/
 
 systemctl daemon-reload
 systemctl enable openmessage.service
-systemctl enable --now om-status-log.timer
+systemctl enable --now om-status-log.timer om-weekly.timer
+# Daily update check; it does nothing unless metadata om-release=latest.
+systemctl enable --now om-update.timer
 
 echo "Done. Next: pair (README step 5), then: systemctl start openmessage"

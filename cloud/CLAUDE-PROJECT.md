@@ -1,8 +1,10 @@
 # claude.ai Project for texts
 
-Create a Project in claude.ai named **Texts**, turn on the OpenMessage
-connector for it, and paste the block below into the Project's instructions.
-USER-GUIDE.md tells the user to work in this Project.
+Optional. The read-only server now sends Claude these rules itself, as MCP
+server instructions (`internal/tools/readonly_instructions.go`). A Project is
+only worth creating if answers show Claude ignoring them: create a Project
+in claude.ai named **Texts**, turn on the OpenMessage connector for it, and
+paste the block below into the Project's instructions.
 
 ---
 

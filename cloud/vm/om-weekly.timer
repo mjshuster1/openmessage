@@ -1,0 +1,9 @@
+[Unit]
+Description=Send the weekly OpenMessage status notice
+
+[Timer]
+OnCalendar=Sun *-*-* 18:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

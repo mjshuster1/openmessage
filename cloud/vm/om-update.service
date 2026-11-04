@@ -1,0 +1,8 @@
+[Unit]
+Description=Update OpenMessage to the newest VM release (rolls back on failure)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/om-update

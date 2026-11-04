@@ -661,11 +661,11 @@ func RunServe(logger zerolog.Logger, args ...string) error {
 	}
 
 	// Create MCP server
-	mcpSrv := mcpserver.NewMCPServer(
-		"openmessage",
-		buildVersion,
-		mcpserver.WithToolCapabilities(true),
-	)
+	serverOpts := []mcpserver.ServerOption{mcpserver.WithToolCapabilities(true)}
+	if opts.mcpReadOnly {
+		serverOpts = append(serverOpts, tools.ReadOnlyServerOptions()...)
+	}
+	mcpSrv := mcpserver.NewMCPServer("openmessage", buildVersion, serverOpts...)
 	v2SendStack := stack
 	if !v2Send {
 		v2SendStack = nil
@@ -950,11 +950,11 @@ func runServeMCPClient(logger zerolog.Logger, opts serveOptions) error {
 		reads = v2read.New(v2Store)
 	}
 
-	mcpSrv := mcpserver.NewMCPServer(
-		"openmessage",
-		buildVersion,
-		mcpserver.WithToolCapabilities(true),
-	)
+	serverOpts := []mcpserver.ServerOption{mcpserver.WithToolCapabilities(true)}
+	if opts.mcpReadOnly {
+		serverOpts = append(serverOpts, tools.ReadOnlyServerOptions()...)
+	}
+	mcpSrv := mcpserver.NewMCPServer("openmessage", buildVersion, serverOpts...)
 	mcpOptions := tools.Options{
 		Reads:     reads,
 		V2Primary: v2Primary,

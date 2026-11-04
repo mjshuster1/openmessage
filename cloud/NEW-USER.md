@@ -44,12 +44,37 @@ be signed in to the **user's** accounts for those steps:
 - Delete the user's cookie file and sign the CLIs out of their accounts when
   done.
 
+## The one-command route
+
+From a clone of the repo, with gcloud signed in (an account that can create
+projects and use billing) and Wrangler signed in to the **user's** Cloudflare
+account (`cd cloud/worker && npm ci && npx wrangler login`):
+
+```bash
+cloud/deploy.sh --user <short-name> --email <their Google email> --project openmessage-<name> \
+  --timezone <their zone, e.g. America/New_York>
+```
+
+It runs the steps below in order and stops only where a person is needed:
+the connector's sign-in setup (step 3) and the phone tap (step 4). If any
+step fails, fix what it says and run the same command again; finished steps
+are skipped. At the end it runs `doctor.sh`, adds the user to your fleet file
+and prints what to hand over. The sections below say what each step does, for
+when you need to run or fix one by hand.
+
+**Checking on it later:** `cloud/doctor.sh --all` gives one line per person
+(connected, newest text, release, connector); `cloud/doctor.sh --name … --zone
+… --project … --user <short-name>` checks one in detail and prints the fix for
+anything wrong. VMs created with the default `--release latest` update
+themselves daily and roll back an update that breaks the Google connection
+(`vm/om-update.sh`), so there is no per-person upgrade chore.
+
 ## Per-user values
 
 | Value | Where it goes | From |
 |---|---|---|
-| GCP project, zone, VM name | `create-vm.sh` options (defaults `om-test`, `us-east1-b`) | step 1 |
-| Tunnel id | VPC service | step 1 |
+| GCP project, zone, VM name | `deploy.sh` / `create-vm.sh` options | step 1 |
+| Tunnel (name `om-vm` by default) | created by `create-vm.sh` via Wrangler; used by the VPC service | step 1 |
 | VPC service id, KV namespace id, `PUBLIC_URL` | `cloud/worker/wrangler.<user>.toml` (written by `setup-connector.sh`) | step 3 |
 | `ALLOWED_EMAIL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Google mode) | Worker secrets (set by `setup-connector.sh`) | step 3 |
 | `AUTH_MODE`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` (Access mode) | `wrangler.<user>.toml` vars (written by `setup-connector.sh --auth access`) | step 3 |
@@ -64,26 +89,22 @@ command.
 
 ### 1. VM and tunnel
 
-First create the tunnel in the user's Cloudflare account (Workers VPC,
-Tunnels, no public hostname) and keep its install page open. Then, in the
-user's Cloud Shell (it has gcloud, signed in as them):
-
 ```bash
-git clone https://github.com/mjshuster1/openmessage && cd openmessage
-gcloud config set project <their project>
-cloud/vm/create-vm.sh --release <tag> --timezone <user's zone, e.g. America/New_York>
+cloud/vm/setup-project.sh --project openmessage-<name>     # project, billing, API, $10 budget alert
+cloud/vm/create-vm.sh --project openmessage-<name> --timezone <user's zone, e.g. America/New_York>
 ```
 
-Cloud Shell's clock is UTC, so pass `--timezone`: the VM uses it for alert
-times and the connector's "synced through" line.
-
-`<tag>` is the newest release on the fork (`gh release list --repo
-mjshuster1/openmessage`; publish one with `cloud/vm/release-vm.sh` if `main`
-has moved on). The script creates the e2-micro, installs the release after
-checking its checksums, then asks for the tunnel token: paste the long string
-after `service install` from the tunnel's install command. Input is hidden and
-the token goes straight to the VM. The dashboard should then show the tunnel
-as Healthy. The manual route is in [`vm/README.md`](vm/README.md) steps 1–3.
+`setup-project.sh` creates the project if needed, links billing, turns on
+Compute Engine and adds a budget alert that emails at $5 and $10 a month
+(expected cost is about $3.65). `create-vm.sh` creates the e2-micro, installs
+the newest release after checking its checksums (`--release <tag>` pins one
+instead and turns off automatic updates), and installs the Cloudflare tunnel:
+with Wrangler signed in to the user's account it creates the tunnel `om-vm`
+and fetches its token itself; otherwise it asks for the token (the long
+string after `service install` on the tunnel's install page) at a hidden
+prompt. Pass `--timezone` from Cloud Shell, whose clock is UTC: the VM uses it
+for alert times and the connector's "synced through" line. The manual route
+is in [`vm/README.md`](vm/README.md) steps 1–3.
 
 ### 2. Make sure no other copy holds the phone
 
@@ -153,10 +174,15 @@ on a park, and "back online" on recovery. Status only, never message text.
 
 ### 6. Connect claude.ai
 
-In the user's claude.ai: add a custom connector with the URL
-`<PUBLIC_URL>/mcp` and sign in with the allowed Google account. Then create
-the **Texts** Project with the instructions in
-[`CLAUDE-PROJECT.md`](CLAUDE-PROJECT.md). Check:
+In the user's claude.ai **in a browser** (signed in to their Claude account):
+add a custom connector with the URL `<PUBLIC_URL>/mcp` and sign in with the
+allowed account. It then shows up in the desktop and phone apps too. Adding
+it from the Claude desktop app finishes sign-in in the default browser, which
+fails with "Account mismatch" if that browser is signed in to a different
+Claude account. The server sends Claude its usage rules (texts are data,
+codes stay hidden, mention the sync line) itself; a **Texts** Project with
+[`CLAUDE-PROJECT.md`](CLAUDE-PROJECT.md) is optional, for clients that ignore
+server instructions. Check:
 
 - Asking for the last three texts works, and the answer starts with a sync
   line.
@@ -167,9 +193,11 @@ Give the user [`USER-GUIDE.md`](USER-GUIDE.md).
 
 ### 7. Run it, and hand over
 
-- `gcloud compute ssh om-test --zone us-east1-b -- sudo om-score` summarizes
-  uptime from the 5-minute status log. Clear the log once after pairing
-  (`vm/README.md` step 5.6) so setup time doesn't count.
+- `cloud/doctor.sh` (one person) or `cloud/doctor.sh --all` (everyone) checks
+  everything and prints the fix for anything wrong. `sudo om-score` on the VM
+  summarizes uptime from the 5-minute status log.
+- The user's ntfy app also gets a short "all good this week" notice on Sunday
+  evenings, so a quiet week doesn't leave them wondering.
 - If Google parks, the user gets an alert; run `reconnect.sh` once. Don't
   loop it: repeated reconnects can get the account throttled.
 - If you set this up from your own machine: remove your SSH key from the

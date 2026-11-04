@@ -27,8 +27,11 @@ the whole test.
 
 | File | What it does |
 |---|---|
-| `create-vm.sh` | One command for steps 1–3: creates the VM with `startup.sh`, waits until it has installed a release, then installs the tunnel from a token typed at a hidden prompt. |
-| `startup.sh` | GCE startup script: downloads the release named in metadata, checks it against `SHA256SUMS`, runs `setup-vm.sh`. Upgrades in place when `om-release` changes. |
+| `setup-project.sh` | Gets a Google Cloud project ready: creates it, links billing, turns on Compute Engine, adds a $10/month budget alert. `--check` only reports. |
+| `create-vm.sh` | One command for steps 1–3: creates the VM with `startup.sh`, waits until it has installed a release (default: the newest), then installs the tunnel. With Wrangler signed in it creates the tunnel and fetches the token itself; otherwise it asks for the token at a hidden prompt. |
+| `startup.sh` | GCE startup script: downloads the release named in metadata (`latest` = newest `*-vmN`, first boot only), checks it against `SHA256SUMS`, runs `setup-vm.sh`. Upgrades in place when `om-release` changes to another tag. Installed as `/usr/local/sbin/om-install-release` for `om-update.sh`. |
+| `om-update.sh`, `.service`, `.timer` | Daily (04:00–05:00 VM time) when `om-release=latest` and `om-auto-update` isn't `no`: installs a newer `*-vmN` release, and if Google Messages was connected and doesn't reconnect within 5 minutes, puts the old binary back, skips that release and sends an alert. |
+| `om-weekly.sh`, `.service`, `.timer` | Sundays 18:00: an ntfy notice with the week's uptime and how many texts synced ("all good this week", or a weekly check if not). Needs alerts on. |
 | `release-vm.sh` | Builds the Linux binaries and the VM bundle from HEAD and publishes them as a GitHub release (the fork's Actions don't run). |
 | `reconnect.sh` | Pairs or re-pairs in one command from your computer: capture, copy, pair with a large emoji prompt, start, watch for 10 minutes. See "Reconnect". |
 | `om-alert.sh`, `set-alerts.sh` | Push alerts through ntfy when Google disconnects (after 10 minutes), parks (at once) or comes back. `set-alerts.sh` turns them on for a VM and sends a test. |

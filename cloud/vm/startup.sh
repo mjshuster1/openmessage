@@ -2,12 +2,17 @@
 # GCE startup script for the OpenMessage VM. create-vm.sh attaches it; the
 # guest agent runs it as root on every boot.
 #
-# Reads instance metadata om-repo (owner/repo) and om-release (tag), downloads
-# that release's Linux binary and VM files, checks both against the release's
-# SHA256SUMS, and runs setup-vm.sh from them: swap, the openmessage user and
-# data dir, the binary and the systemd units. A boot at the release already
-# installed does nothing. Changing om-release and rebooting upgrades in place
-# and restarts OpenMessage if it was running.
+# Reads instance metadata om-repo (owner/repo) and om-release (a tag, or
+# "latest"), downloads that release's Linux binary and VM files, checks both
+# against the release's SHA256SUMS, and runs setup-vm.sh from them: swap, the
+# openmessage user and data dir, the binary and the systemd units. A boot at
+# the release already installed does nothing. Changing om-release to a tag and
+# rebooting upgrades in place and restarts OpenMessage if it was running.
+#
+# om-release=latest installs the newest *-vmN release on the first boot only;
+# after that om-update.sh (daily timer) keeps it current and rolls back an
+# update that breaks the Google connection. setup-vm.sh installs this script
+# as /usr/local/sbin/om-install-release, which om-update.sh calls with OM_TAG.
 #
 # It never pairs or starts OpenMessage the first time, and never touches the
 # tunnel; see create-vm.sh. Testing without a release: put the four files in a
@@ -21,7 +26,7 @@ md() {
 }
 
 REPO=$(md om-repo)
-TAG=$(md om-release)
+TAG=${OM_TAG:-$(md om-release)}
 if [ -z "${OM_ASSETS:-}" ] && { [ -z "$REPO" ] || [ -z "$TAG" ]; }; then
   log "metadata om-repo and om-release are required; nothing installed"
   exit 1
@@ -35,8 +40,18 @@ if [ -n "$TZW" ] && [ -f "/usr/share/zoneinfo/$TZW" ] && [ "$(timedatectl show -
   systemctl is-active --quiet openmessage 2>/dev/null && systemctl restart openmessage
 fi
 
-WANT="${REPO}@${TAG}"
 STAMP=/var/lib/openmessage-release
+if [ "$TAG" = latest ] && [ -z "${OM_ASSETS:-}" ]; then
+  if [ -f "$STAMP" ]; then
+    log "already at $(cat "$STAMP") (om-release=latest: om-update.sh handles updates)"
+    exit 0
+  fi
+  TAG=$(curl -fsSL --retry 5 --retry-delay 3 "https://api.github.com/repos/$REPO/releases?per_page=30" \
+    | grep -oE '"tag_name": *"[^"]+-vm[0-9]+"' | head -1 | sed -E 's/.*"([^"]+)"$/\1/' || true)
+  [ -n "$TAG" ] || { log "download failed: no *-vmN release found on $REPO"; exit 1; }
+  log "latest release is $TAG"
+fi
+WANT="${REPO}@${TAG}"
 if [ -z "${OM_ASSETS:-}" ] && [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$WANT" ]; then
   log "already at $WANT"
   exit 0

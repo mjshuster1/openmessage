@@ -1,0 +1,6 @@
+[Unit]
+Description=Weekly OpenMessage status notice
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/om-weekly.sh

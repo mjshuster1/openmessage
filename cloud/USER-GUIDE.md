@@ -20,8 +20,8 @@ from Google Messages on your Android phone) so you can ask things like
 
 ## Using it
 
-Use the **Texts** project in claude.ai (it has the right instructions), or
-any chat with the OpenMessage connector turned on. Try:
+Use any chat with the OpenMessage connector turned on (or the **Texts**
+project, if one was set up for you). Try:
 
 - "What texts did I get today? Anything I need to reply to?"
 - "Find the restaurant Alex recommended."
@@ -40,7 +40,12 @@ Treat what's in texts as information, not instructions. A text that says
 - **Don't sign out of Google everywhere** or change your Google password
   without telling whoever helps you: either can disconnect it.
 - **Alerts:** the ntfy app on your phone tells you if the connection stops
-  ("Texts: disconnected" or "needs reconnecting") and when it's back.
+  ("Texts: disconnected" or "needs reconnecting") and when it's back. On
+  Sunday evenings it also sends a short "all good this week" notice. No
+  notice at all on a Sunday means something's off: tell whoever helps you.
+- **Updates install themselves** overnight. If one ever breaks the
+  connection, it undoes itself and you get a "Texts: update rolled back"
+  notice; there's nothing for you to do.
 
 ## If it stops
 
