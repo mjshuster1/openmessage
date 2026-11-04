@@ -13,7 +13,7 @@ STATE=/var/lib/openmessage/weekly-total
 # Connected share of the last 7 days of 5-minute samples.
 pct=$(tail -n 2016 "$LOG" 2>/dev/null | jq -rs 'if length == 0 then "?" else (map(select(.up == true and .connected == true)) | length) * 100 / length | floor | tostring end')
 now_ok=no
-curl -s -m 5 127.0.0.1:7007/api/status | jq -e '.google.connected == true' >/dev/null 2>&1 && now_ok=yes
+[ "$(curl -s -m 5 127.0.0.1:7007/api/status 2>/dev/null | jq -r '.google.connected' 2>/dev/null)" = true ] && now_ok=yes
 
 total=$(sudo -u openmessage OPENMESSAGES_DATA_DIR=/var/lib/openmessage timeout 30 /usr/local/bin/openmessage status --json 2>/dev/null | jq -r '.total_messages // empty' || true)
 count=
@@ -31,7 +31,9 @@ if [ "$now_ok" = yes ] && [ "$pct" != "?" ] && [ "$pct" -ge 99 ]; then
 else
   title="${ALERT_NAME:-Texts}: weekly check"
   state=$([ "$now_ok" = yes ] && echo "connected now" || echo "NOT connected now")
-  body="${synced}Connected ${pct}% of the time this week, ${state}. If it says not connected, see your guide's 'If it stops'."
+  share="Connected ${pct}% of the time this week"
+  [ "$pct" = "?" ] && share="No status samples this week"
+  body="${synced}${share}, ${state}. If it says not connected, see your guide's 'If it stops'."
   tags=warning
 fi
 curl -fsS -m 15 -o /dev/null -H "Title: $title" -H "Tags: $tags" -d "$body" \

@@ -16,7 +16,8 @@ md() {
   curl -sf -H 'Metadata-Flavor: Google' \
     "http://metadata.google.internal/computeMetadata/v1/instance/attributes/$1" 2>/dev/null || true
 }
-connected() { curl -s -m 5 127.0.0.1:7007/api/status 2>/dev/null | jq -e '.google.connected == true' >/dev/null 2>&1; }
+# Exactly "true" from a live server; no answer or no JSON is "not connected".
+connected() { [ "$(curl -s -m 5 127.0.0.1:7007/api/status 2>/dev/null | jq -r '.google.connected' 2>/dev/null)" = true ]; }
 
 REPO=$(md om-repo)
 [ "$(md om-release)" = latest ] || { log "om-release isn't 'latest'; nothing to do"; exit 0; }

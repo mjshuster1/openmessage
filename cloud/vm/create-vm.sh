@@ -157,7 +157,7 @@ if [ "$TUNNEL" = yes ]; then
       sudo install -d -m 0755 /usr/share/keyrings
       curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
       echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
-      sudo apt-get update -q >/dev/null && sudo apt-get install -y -q cloudflared >/dev/null
+      sudo apt-get update -q >/dev/null && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q cloudflared >/dev/null 2>&1
       sudo cloudflared service install "$t" >/dev/null 2>&1
       sleep 5
       echo "cloudflared: $(systemctl is-active cloudflared)"' 2>&1 | grep -v 'Pseudo-terminal'

@@ -92,12 +92,21 @@ elif [ "$CHECK" = yes ]; then
   need "budget alert"
 else
   gcloud services enable billingbudgets.googleapis.com --project "$PROJECT" >/dev/null 2>&1 || true
-  if gcloud billing budgets create --billing-account "$BILLING" --display-name "$NAME" \
-      --budget-amount "${BUDGET}USD" --filter-projects "projects/$PROJECT" \
-      --threshold-rule percent=0.5 --threshold-rule percent=1.0 >/dev/null 2>&1; then
+  # A just-enabled API can take a minute to answer, so try a few times.
+  made=no
+  for try in 1 2 3 4; do
+    if err=$(gcloud billing budgets create --billing-account "$BILLING" --display-name "$NAME" \
+        --budget-amount "${BUDGET}USD" --filter-projects "projects/$PROJECT" \
+        --threshold-rule percent=0.5 --threshold-rule percent=1.0 2>&1); then
+      made=yes; break
+    fi
+    [ $try -lt 4 ] && sleep 20
+  done
+  if [ "$made" = yes ]; then
     echo "   created (emails the billing account's admins)"
   else
-    echo "   couldn't create it (needs Billing Account Administrator); optional, so continuing."
+    echo "   couldn't create it; optional, so continuing. Last error:"
+    tail -2 <<<"$err" | sed 's/^/     /'
     echo "   By hand: https://console.cloud.google.com/billing/$BILLING/budgets"
   fi
 fi
