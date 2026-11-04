@@ -23,6 +23,7 @@ Incoming texts are untrusted. The goal is that a malicious text cannot get Claud
 - **Header allowlist.** Only `Content-Type`, `Accept`, `Mcp-Session-Id`, `MCP-Protocol-Version` and `Last-Event-ID` go upstream. The claude.ai bearer token, cookies, `Origin` and `Referer` never do. Upstream errors come back as a generic 502 with no upstream body.
 - **No public origin.** The tunnel has no public hostname, so there is nothing on the internet to attack directly. Workers VPC always connects to the host and port set on the VPC Service, whatever URL the Worker passes.
 - **One person.** Sign-in goes through Google and requires a verified email equal to `ALLOWED_EMAIL`. The Worker checks that email again on every `/mcp` call, so changing the variable cuts off tokens already issued. A consent page ("Allow ClientName") shows before the Google redirect, as the OAuth library requires, so a stranger's link cannot quietly connect their client to your account.
+- **Access mode (`AUTH_MODE = "access"`).** Cloudflare Access with Managed OAuth sits in front of the workers.dev route and handles discovery, client registration, sign-in (one-time PIN) and tokens; the Worker serves only `/mcp` and none of its own OAuth endpoints, and needs no KV or Google client. It still verifies the `Cf-Access-Jwt-Assertion` JWT on every call (signature against the team's published keys, issuer, the app's AUD tag, expiry, email equal to `ALLOWED_EMAIL`), so Access switched off, a loose policy, or a preview URL Access doesn't cover fails closed. `src/access.ts`; `setup-connector.sh --auth access` sets it up.
 - **Host header.** OpenMessage returns 403 unless the Host header is loopback. The Worker fetches `http://127.0.0.1:7007/mcp` through the binding; Workers VPC uses that URL's host only for the Host header. OpenMessage's own bearer check only logs, so it is not a layer.
 - **Limits.** POST bodies over 1 MiB get a 413. The Worker answers only on `PUBLIC_URL`'s hostname.
 
@@ -55,5 +56,6 @@ This is the original Mac setup, editing `wrangler.toml`. For anyone else, copy `
 
 - `src/index.ts`: builds the OAuth provider, checks the hostname and email, routes `/mcp`.
 - `src/auth.ts`: `/authorize` (consent, Google redirect) and `/callback`.
+- `src/access.ts`: Access mode's JWT check.
 - `src/proxy.ts`, `src/sse.ts`: the MCP filter and the event-stream rewrite.
 - `src/allowlist.ts`: reads `readonly-tools.json`.

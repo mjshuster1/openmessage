@@ -31,6 +31,8 @@ func TestRedactOneTimeCodesPositives(t *testing.T) {
 			"[2026-11-03T15:42:00-05:00] ← 22000: «Your Google verification code is [code hidden]»"},
 		{"Your code is 2024", "Your code is [code hidden]"},
 		{"Verify your login: code 48219 (valid 5 minutes)", "Verify your login: code [code hidden] (valid 5 minutes)"},
+		{"Your verification code is 482910. Never share it to pay anyone", "Your verification code is [code hidden]. Never share it to pay anyone"},
+		{"Balance alert. Your login code: 553201", "Balance alert. Your login code: [code hidden]"},
 		{"Your Instagram code is 482 193.", "Your Instagram code is [code hidden]."},
 	}
 	for _, tc := range cases {
@@ -74,6 +76,11 @@ func TestRedactOneTimeCodesNegatives(t *testing.T) {
 		"Your code is 123",
 		"Your code is 123456789012",
 		"Verify the wire for 10000 dollars",
+		"paid 2500 for the couch, verify when you get it",
+		"he owes me 3000, can you verify?",
+		"Your balance is 4821. Log in to see details",
+		"rent is 2400 this month, sign in to the portal to pay",
+		"Total: 1299. Verify your order online",
 	}
 	for _, in := range cases {
 		if got := RedactOneTimeCodes(in); got != in {

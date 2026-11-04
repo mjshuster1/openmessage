@@ -1,4 +1,5 @@
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
+import { ACCESS_JWT_HEADER, accessConfig, verifyAccessJwt } from "./access";
 import { handleAuth, isAllowedEmail } from "./auth";
 import type { Env, Props } from "./env";
 import { handleMcp } from "./proxy";
@@ -43,6 +44,22 @@ function providerFor(publicUrl: string): OAuthProvider<Env> {
   return provider;
 }
 
+const plain = (body: string, status: number) =>
+  new Response(body, { status, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+
+/** AUTH_MODE = "access": Cloudflare Access did the sign-in; check its JWT, then proxy. */
+async function accessFetch(request: Request, env: Env): Promise<Response> {
+  const cfg = accessConfig(env);
+  if (!cfg) return plain("Access mode is missing ACCESS_TEAM_DOMAIN or ACCESS_AUD.", 500);
+  if (new URL(request.url).pathname !== "/mcp") return plain("Not found", 404);
+  const check = await verifyAccessJwt(request.headers.get(ACCESS_JWT_HEADER), cfg, env);
+  if (!check.ok) {
+    console.log(JSON.stringify({ access: "refused", reason: check.reason }));
+    return plain(check.status === 403 ? "Forbidden" : check.status === 502 ? "Bad gateway" : "Unauthorized", check.status);
+  }
+  return handleMcp(request, env);
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const publicUrl = (env.PUBLIC_URL ?? "").replace(/\/+$/, "");
@@ -50,6 +67,9 @@ export default {
     if (!publicUrl || new URL(request.url).origin !== new URL(publicUrl).origin) {
       return new Response("Not found", { status: 404 });
     }
+    const mode = (env.AUTH_MODE ?? "google").trim().toLowerCase();
+    if (mode === "access") return accessFetch(request, env);
+    if (mode !== "google") return plain(`Unknown AUTH_MODE "${mode}".`, 500);
     return providerFor(publicUrl).fetch(request, env, ctx);
   },
 };

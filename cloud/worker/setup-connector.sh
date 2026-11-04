@@ -3,14 +3,21 @@
 # steps 3-4): VPC service on their tunnel, KV namespace, wrangler.<user>.toml,
 # deploys, Worker secrets. Safe to re-run: it reuses what already exists.
 #
-#   cloud/worker/setup-connector.sh --user <short-name> --email <google email>
+#   cloud/worker/setup-connector.sh --user <short-name> --email <email>
+#                                   [--auth google|access] [--access-aud <AUD tag>]
 #                                   [--tunnel om-vm] [--worker openmessage-connector] [--port 7007]
 #
 # Before: `npx wrangler login` as the user (check `npx wrangler whoami`), the
 # tunnel created and Healthy (create-vm.sh installs it), `npm ci` in this
-# folder. The one manual step left is the Google OAuth client; the script
-# stops and says exactly what to create, then asks for its id and secret at
-# hidden prompts. Nothing secret is written to disk or echoed.
+# folder. Nothing secret is written to disk or echoed.
+#
+# --auth google (default): the Worker signs the user in with Google. The one
+# manual step is a Google OAuth client; the script says exactly what to
+# create, then asks for its id and secret at hidden prompts.
+# --auth access: Cloudflare Access (Managed OAuth) does the sign-in, by
+# emailed one-time PIN; no Google client, no KV. The manual step is turning
+# Access on for the Worker in the dashboard; the script stops, says what to
+# click, and checks it. Re-run after a manual step if it exits.
 #
 # Writes wrangler.<user>.toml here (git ignores it). Prints the connector URL
 # to add in claude.ai.
@@ -21,6 +28,8 @@ EMAIL=
 TUNNEL=om-vm
 WORKER=openmessage-connector
 PORT=7007
+AUTH=google
+ACCESS_AUD=
 while [ $# -gt 0 ]; do
   case "$1" in
     --user) USER_NAME=$2; shift 2 ;;
@@ -28,7 +37,9 @@ while [ $# -gt 0 ]; do
     --tunnel) TUNNEL=$2; shift 2 ;;
     --worker) WORKER=$2; shift 2 ;;
     --port) PORT=$2; shift 2 ;;   # OpenMessage's port on the VM; Cloudflare allows one service per host:port per account
-    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+    --auth) AUTH=$2; shift 2 ;;
+    --access-aud) ACCESS_AUD=$2; shift 2 ;;
+    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -36,6 +47,8 @@ done
 [[ "$USER_NAME" =~ ^[a-z0-9-]+$ ]] || { echo "--user: lowercase letters, digits and - only" >&2; exit 2; }
 [[ "$WORKER" =~ ^[a-z0-9-]+$ ]] || { echo "--worker: lowercase letters, digits and - only" >&2; exit 2; }
 [[ "$EMAIL" == *@*.* ]] || { echo "--email doesn't look like an email address" >&2; exit 2; }
+[[ "$AUTH" == google || "$AUTH" == access ]] || { echo "--auth: google or access" >&2; exit 2; }
+[ -z "$ACCESS_AUD" ] || [[ "$ACCESS_AUD" =~ ^[A-Za-z0-9]{16,}$ ]] || { echo "--access-aud: the AUD tag is a long hex string" >&2; exit 2; }
 
 cd "$(dirname "$0")"
 W() { npx --no-install wrangler "$@"; }
@@ -50,7 +63,7 @@ acct_count=$(json 'd=>d.accounts.length' <<<"$who")
 echo "Cloudflare account: $(json 'd=>d.accounts[0].name' <<<"$who") ($(json 'd=>d.email' <<<"$who"))"
 read -rp "Is this the user's account? [y/N] " yn; [[ "$yn" == [yY]* ]] || exit 1
 
-echo "1/6 Tunnel '$TUNNEL'"
+echo "1/6 Tunnel '$TUNNEL'  (sign-in: $AUTH)"
 tline=$(W tunnel list 2>/dev/null | grep -E "│ *$UUID *│ *$TUNNEL *│" || true)
 TUNNEL_ID=$(grep -oE "$UUID" <<<"$tline" | head -1)
 [ -n "$TUNNEL_ID" ] || { echo "No tunnel named $TUNNEL. Create it (Workers VPC, Tunnels) and install it on the VM (create-vm.sh)." >&2; exit 1; }
@@ -70,20 +83,39 @@ if [ -z "$VPC_ID" ]; then
 fi
 echo "   $VPC_ID"
 
-echo "3/6 KV namespace '$WORKER-oauth'"
-KV_ID=$(W kv namespace list 2>/dev/null | json "d=>(d.find(n=>n.title==='$WORKER-oauth')||{}).id")
-if [ -z "$KV_ID" ]; then
-  W kv namespace create "$WORKER-oauth" >/dev/null 2>&1 || true
+KV_ID=
+if [ "$AUTH" = google ]; then
+  echo "3/6 KV namespace '$WORKER-oauth'"
   KV_ID=$(W kv namespace list 2>/dev/null | json "d=>(d.find(n=>n.title==='$WORKER-oauth')||{}).id")
-  [ -n "$KV_ID" ] || { echo "Creating the KV namespace failed." >&2; exit 1; }
+  if [ -z "$KV_ID" ]; then
+    W kv namespace create "$WORKER-oauth" >/dev/null 2>&1 || true
+    KV_ID=$(W kv namespace list 2>/dev/null | json "d=>(d.find(n=>n.title==='$WORKER-oauth')||{}).id")
+    [ -n "$KV_ID" ] || { echo "Creating the KV namespace failed." >&2; exit 1; }
+  fi
+  echo "   $KV_ID"
+else
+  echo "3/6 KV namespace: not needed with Access"
 fi
-echo "   $KV_ID"
 
-write_cfg() { # $1 = PUBLIC_URL
+# Values a previous run wrote, so a re-run keeps them.
+cfg_val() { { grep -E "^$1 = \"" "$CFG" 2>/dev/null || true; } | head -1 | sed -E 's/^[A-Z_]+ = "(.*)"$/\1/'; }
+TEAM=
+if [ "$AUTH" = access ] && [ "$(cfg_val AUTH_MODE)" = access ]; then
+  TEAM=$(cfg_val ACCESS_TEAM_DOMAIN)
+  [ -n "$ACCESS_AUD" ] || ACCESS_AUD=$(cfg_val ACCESS_AUD)
+fi
+
+write_cfg() { # $1 = PUBLIC_URL; also uses AUTH, TEAM, ACCESS_AUD
+  local drop='/^# google-auth-/d'
+  [ "$AUTH" = access ] && drop='/^# google-auth-begin/,/^# google-auth-end/d'
   sed -e "s|^name = \".*\"|name = \"$WORKER\"|" \
       -e "s|FILL-kv-namespace-id|$KV_ID|" \
       -e "s|FILL-vpc-service-id|$VPC_ID|" \
       -e "s|^PUBLIC_URL = \".*\"|PUBLIC_URL = \"$1\"|" \
+      -e "s|^AUTH_MODE = \".*\"|AUTH_MODE = \"$AUTH\"|" \
+      -e "s|^ACCESS_TEAM_DOMAIN = \".*\"|ACCESS_TEAM_DOMAIN = \"$TEAM\"|" \
+      -e "s|^ACCESS_AUD = \".*\"|ACCESS_AUD = \"$ACCESS_AUD\"|" \
+      -e "$drop" \
       wrangler.example.toml > "$CFG"
 }
 
@@ -99,11 +131,69 @@ fi
 write_cfg "$PUBLIC_URL"
 echo "   $PUBLIC_URL  (config: cloud/worker/$CFG)"
 
+# What answers at /mcp without a sign-in. 401 + resource_metadata: Access with
+# Managed OAuth (sets TEAM from its metadata). A redirect to
+# *.cloudflareaccess.com: Access without Managed OAuth. Anything else: the
+# Worker itself answered, so Access isn't in front.
+access_probe() {
+  local hdrs meta
+  hdrs=$(curl -s -o /dev/null -D - -m 15 -X POST -H 'Content-Type: application/json' -d '{}' "$PUBLIC_URL/mcp" | tr -d '\r' || true)
+  if grep -qiE '^www-authenticate:.*resource_metadata="https://' <<<"$hdrs"; then
+    meta=$(grep -iE '^www-authenticate:' <<<"$hdrs" | grep -oE 'resource_metadata="https://[^"]+"' | head -1 | cut -d'"' -f2)
+    TEAM=$(curl -s -m 15 "$meta" | json 'd=>d.team_domain' 2>/dev/null || true)
+    if [ -n "$TEAM" ]; then PROBE=managed; else PROBE=unknown; fi
+  elif grep -qiE '^location: https://[a-z0-9-]+\.cloudflareaccess\.com/' <<<"$hdrs"; then
+    PROBE=plain
+  else
+    PROBE=none
+  fi
+}
+
+access_howto() {
+  cat <<HOWTO
+
+   Turn on Cloudflare Access for the Worker (Cloudflare dashboard, the user's account):
+     a. Workers & Pages > $WORKER > Domains: on the Production workers.dev row,
+        click "Enable Access". Scope: All traffic. Policy: Allow, only $EMAIL.
+        (The first time, Zero Trust asks for a team name and a plan: Free.)
+     b. Zero Trust > Access controls > Applications > the new $WORKER app > Edit:
+        login method One-time PIN; turn on Managed OAuth with dynamic client
+        registration and these allowed redirect URIs:
+          https://claude.ai/api/mcp/auth_callback
+          https://claude.com/api/mcp/auth_callback
+        Save, and copy the app's "Application Audience (AUD) Tag".
+HOWTO
+}
+
+if [ "$AUTH" = access ]; then
+  echo "4b/6 Cloudflare Access in front of $PUBLIC_URL"
+  while :; do
+    access_probe
+    case $PROBE in
+      managed) echo "   Access with Managed OAuth is on (team $TEAM)"; break ;;
+      plain) echo "   Access is on, but Managed OAuth isn't (sign-in redirects instead of answering 401)." ;;
+      unknown) echo "   Access answered 401, but its metadata didn't name a team. Check the app." ;;
+      none) echo "   Access isn't on yet: the Worker itself answered." ;;
+    esac
+    access_howto
+    if [ -t 0 ]; then read -rp "   Press Enter once it's saved (Ctrl-C to stop) " _; else exit 1; fi
+  done
+  if [ -z "$ACCESS_AUD" ]; then
+    [ -t 0 ] || { echo "   Re-run with --access-aud <the app's AUD tag>." >&2; exit 1; }
+    read -rp "   Application Audience (AUD) Tag: " ACCESS_AUD
+  fi
+  [[ "$ACCESS_AUD" =~ ^[A-Za-z0-9]{16,}$ ]] || { echo "   That doesn't look like an AUD tag (a long hex string on the app's page)." >&2; exit 1; }
+  write_cfg "$PUBLIC_URL"
+  echo "   team domain and AUD tag saved in $CFG"
+fi
+
 echo "5/6 Secrets"
 existing=$(W secret list -c "$CFG" 2>/dev/null || true)
 printf '%s' "$EMAIL" | W secret put ALLOWED_EMAIL -c "$CFG" >/dev/null 2>&1
 echo "   ALLOWED_EMAIL set"
-if grep -q GOOGLE_CLIENT_SECRET <<<"$existing" && grep -q GOOGLE_CLIENT_ID <<<"$existing"; then
+if [ "$AUTH" = access ]; then
+  yn=n
+elif grep -q GOOGLE_CLIENT_SECRET <<<"$existing" && grep -q GOOGLE_CLIENT_ID <<<"$existing"; then
   read -rp "   Google OAuth client already set. Replace it? [y/N] " yn
 else
   yn=y
@@ -133,10 +223,16 @@ echo "6/6 Deploy"
 W deploy -c "$CFG" >/dev/null 2>&1 || { W deploy -c "$CFG"; exit 1; }
 code=$(curl -s -o /dev/null -w '%{http_code}' -m 15 "$PUBLIC_URL/mcp" || true)
 echo "   $PUBLIC_URL/mcp answers $code without sign-in (401 is right)"
+how="sign in with $EMAIL"
+if [ "$AUTH" = access ]; then
+  access_probe
+  [ "$PROBE" = managed ] || echo "   warning: Access with Managed OAuth isn't answering in front of the Worker now; re-run to check." >&2
+  how="sign in with $EMAIL (Cloudflare emails a one-time PIN)"
+fi
 
 cat <<EOF
 
 Done. In claude.ai (Settings > Connectors > Add custom connector):
   URL:  $PUBLIC_URL/mcp
-then sign in with $EMAIL. Ask it for the last three texts to check.
+then $how. Ask it for the last three texts to check.
 EOF

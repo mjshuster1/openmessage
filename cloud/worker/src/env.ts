@@ -9,8 +9,14 @@ export interface Env {
   ORIGIN: Fetcher;
   // Vars (wrangler.toml)
   PUBLIC_URL: string;
+  /** "google" (default): this Worker runs OAuth with Google sign-in. "access": Cloudflare Access does. */
+  AUTH_MODE?: string;
+  /** Access mode only: team domain (xxx.cloudflareaccess.com) and the Access application's AUD tag. */
+  ACCESS_TEAM_DOMAIN?: string;
+  ACCESS_AUD?: string;
   // Secrets (ALLOWED_EMAIL is a secret so the address stays out of the public repo)
   ALLOWED_EMAIL: string;
+  // Google mode only
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
 }

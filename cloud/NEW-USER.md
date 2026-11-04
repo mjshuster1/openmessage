@@ -51,7 +51,8 @@ be signed in to the **user's** accounts for those steps:
 | GCP project, zone, VM name | `create-vm.sh` options (defaults `om-test`, `us-east1-b`) | step 1 |
 | Tunnel id | VPC service | step 1 |
 | VPC service id, KV namespace id, `PUBLIC_URL` | `cloud/worker/wrangler.<user>.toml` (written by `setup-connector.sh`) | step 3 |
-| `ALLOWED_EMAIL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Worker secrets (set by `setup-connector.sh`) | step 3 |
+| `ALLOWED_EMAIL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Google mode) | Worker secrets (set by `setup-connector.sh`) | step 3 |
+| `AUTH_MODE`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` (Access mode) | `wrangler.<user>.toml` vars (written by `setup-connector.sh --auth access`) | step 3 |
 | ntfy topic | `/etc/openmessage/alert.env` on the VM (set by `set-alerts.sh`) | step 5 |
 
 `cloud/worker/wrangler.toml` is the original owner's live config. Don't edit
@@ -107,6 +108,14 @@ URI it prints). It asks for the client id and secret at hidden prompts. It's
 safe to re-run; it reuses what exists. Cloudflare allows one VPC service per
 `127.0.0.1:<port>` per account, which only matters if the account already has
 one. [`worker/README.md`](worker/README.md) explains the security model.
+
+**Coming: `--auth access`.** Instead of a Google OAuth client, Cloudflare
+Access (Managed OAuth, Zero Trust Free plan) does the sign-in, by an emailed
+one-time PIN, and the Worker checks Access's signed token on every call. The
+manual step becomes "Enable Access" on the Worker's workers.dev row plus
+Managed OAuth and two redirect URIs; the script prints the clicks and checks
+them. It worked in claude.ai on web and mobile on 2026-11-03; keep using the
+default (Google) until the 24-hour and 3-day re-checks pass.
 
 ### 4. Pair
 

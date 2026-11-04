@@ -13,10 +13,12 @@ compatibility_date = "2026-10-01"
 # Needed by the OAuth provider for Client ID Metadata Document (CIMD) clients.
 compatibility_flags = ["global_fetch_strictly_public"]
 
+# google-auth-begin (Google sign-in mode only; setup-connector.sh --auth access drops this block)
 # KV namespace OAUTH_KV: `npx wrangler kv namespace create OAUTH_KV`.
 [[kv_namespaces]]
 binding = "OAUTH_KV"
 id = "FILL-kv-namespace-id"
+# google-auth-end
 
 # Workers VPC Service: host 127.0.0.1, HTTP port 7007, on your tunnel.
 # `npx wrangler vpc service list` shows the id.
@@ -29,7 +31,13 @@ service_id = "FILL-vpc-service-id"
 # redirect URI registered with Google (<PUBLIC_URL>/callback). Deploy once to
 # learn it, then fill it in and deploy again.
 PUBLIC_URL = "https://FILL.workers.dev"
+# "google" (default): this Worker signs the user in with Google. "access":
+# Cloudflare Access (Managed OAuth) sits in front and does the sign-in; the
+# Worker then checks Access's token against these two values:
+AUTH_MODE = "google"
+ACCESS_TEAM_DOMAIN = ""
+ACCESS_AUD = ""
 
 # Secrets (never in this file), each with `npx wrangler secret put NAME -c wrangler.<you>.toml`:
-#   ALLOWED_EMAIL (the one Google account allowed to sign in),
-#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+#   ALLOWED_EMAIL (the one account allowed in, both modes),
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (Google mode only)

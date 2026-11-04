@@ -24,6 +24,11 @@ var otpYearCueRE = regexp.MustCompile(`(?i)\b(?:code|pin|otp|passcode|2fa)\W{0,3
 // as an identifier, reference or quantity rather than a secret.
 var otpIDContextRE = regexp.MustCompile(`(?i)(?:^|[^a-z])(?:id|ids|conv|conversation|msg|ref|reference|order|flight|room|suite|ste|apt|unit|ext|extension|box|no|number|num|route|bus|gate|seat|invoice|ticket|case|ending in|ending|account|acct|card|zip|platform|version|v|at|by|until|till|before|after|around)\s*$`)
 
+// otpAmountContextRE matches the end of the text before a number that makes
+// it an amount of money ("paid 2500", "owes me 300", "rent is 2400"), which a
+// nearby "verify" or "sign in" doesn't turn into a code.
+var otpAmountContextRE = regexp.MustCompile(`(?i)(?:^|[^a-z])(?:paid|pay|paying|owe|owes|owed|cost|costs|spent|spend|spending|charged|charge|price|priced|total|budget|worth|sold|bought|earned|tip|deposit|deposited|refund|refunded|balance|rent|salary|fee|bill)(?:\s+(?:is|was|of|for|about|around|me|you|him|her|them|us))?\s*$`)
+
 // otpStreetWords end a street address ("1234 Main St") when they follow a
 // number after at most two capitalized words.
 var otpStreetWords = map[string]bool{
@@ -216,7 +221,7 @@ func otpCandidateStart(s string, start int) (int, bool) {
 			return 0, false
 		}
 	}
-	if otpIDContextRE.MatchString(strings.TrimRight(s[:start], " :=#")) {
+	if before := strings.TrimRight(s[:start], " :=#"); otpIDContextRE.MatchString(before) || otpAmountContextRE.MatchString(before) {
 		return 0, false
 	}
 	// A sender label in tool text: "← 22000: «…»" or "[ts] 22000: …".
