@@ -1,31 +1,42 @@
 #!/usr/bin/env bash
-# Sets up OpenMessage for one person, start to finish, by running the other
+# Sets up OpenMessage for one client, start to finish, by running the other
 # scripts in order. Resumable: a step that finished is skipped next time, so
 # after a failure fix what it says and run the same command again.
 #
 #   cloud/deploy.sh --user <short-name> --email <their Google email> --project <new-or-existing-id>
-#                   [--auth google|access] [--zone us-east1-b] [--name openmessage]
-#                   [--tunnel om-vm] [--timezone America/New_York] [--release latest]
-#                   [--billing-account <id>] [--restart]
+#                   [--label "Mike"] [--auth google|access] [--zone us-east1-b]
+#                   [--timezone America/New_York] [--release latest]
+#                   [--billing-account <id>] [--alerts operator|client] [--restart]
+#                   [--name om-<user>] [--tunnel om-<user>] [--worker om-<user>] [--port auto]
+#
+# Hosted on the operator's accounts: every client's VM, tunnel and connector
+# Worker is named om-<user> (KV namespace om-<user>-oauth), and each client
+# gets its own Workers VPC port (Cloudflare allows one service per host:port
+# per account): --port auto takes the client's existing one, or the lowest
+# free port from 7101 up. The VM forwards that port to OpenMessage.
+# Alerts (--alerts operator, the default) go to the operator's own ntfy topic,
+# kept in ~/.config/openmessage/operator-topic and created the first time,
+# labelled with --label; the client installs nothing. --alerts client makes a
+# topic for the client instead.
 #
 # Steps (the ones marked * need a person):
-#   1. check this computer (gcloud, Node, Chrome, Wrangler signed in to THEIR Cloudflare)
+#   1. check this computer (gcloud, Node, Chrome, Wrangler signed in to the hosting Cloudflare)
 #   2. Google Cloud project, billing, budget alert          (setup-project.sh)
 #   3. VM, release, Cloudflare tunnel                      (vm/create-vm.sh)
 #   4. * claude.ai connector Worker                        (worker/setup-connector.sh)
 #        google: a Google OAuth client; access: turn on Cloudflare Access
 #   5. * pair Google Messages, phone in hand               (vm/reconnect.sh)
-#   6. push alerts                                         (vm/set-alerts.sh)
+#   6. push alerts, to the operator by default             (vm/set-alerts.sh)
 #   7. check everything, add to the fleet file             (doctor.sh)
 # Then it prints what to hand over. Before: `gcloud auth login` as an account
-# that may create projects and use their billing, and `cd cloud/worker &&
-# npm ci && npx wrangler login` as THEIR Cloudflare account.
+# that may create projects and use the billing account, and `cd cloud/worker &&
+# npm ci && npx wrangler login` as the Cloudflare account that hosts clients.
 # --restart forgets which steps finished.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-USER_NAME= EMAIL= PROJECT= AUTH=google ZONE=us-east1-b NAME=openmessage TUNNEL=om-vm
-TIMEZONE= RELEASE=latest BILLING= RESTART=no
+USER_NAME= EMAIL= PROJECT= AUTH=google ZONE=us-east1-b NAME= TUNNEL= WORKER= PORT=auto
+TIMEZONE= RELEASE=latest BILLING= RESTART=no LABEL= ALERTS=operator
 while [ $# -gt 0 ]; do
   case "$1" in
     --user) USER_NAME=$2; shift 2 ;;
@@ -35,17 +46,26 @@ while [ $# -gt 0 ]; do
     --zone) ZONE=$2; shift 2 ;;
     --name) NAME=$2; shift 2 ;;
     --tunnel) TUNNEL=$2; shift 2 ;;
+    --worker) WORKER=$2; shift 2 ;;
+    --port) PORT=$2; shift 2 ;;
+    --label) LABEL=$2; shift 2 ;;
+    --alerts) ALERTS=$2; shift 2 ;;
     --timezone) TIMEZONE=$2; shift 2 ;;
     --release) RELEASE=$2; shift 2 ;;
     --billing-account) BILLING=$2; shift 2 ;;
     --restart) RESTART=yes; shift ;;
-    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
 [ -n "$USER_NAME" ] && [ -n "$EMAIL" ] && [ -n "$PROJECT" ] || { echo "--user, --email and --project are required (see --help)" >&2; exit 2; }
 [[ "$USER_NAME" =~ ^[a-z0-9-]+$ ]] || { echo "--user: lowercase letters, digits and - only" >&2; exit 2; }
 [[ "$AUTH" == google || "$AUTH" == access ]] || { echo "--auth: google or access" >&2; exit 2; }
+[[ "$ALERTS" == operator || "$ALERTS" == client ]] || { echo "--alerts: operator or client" >&2; exit 2; }
+[[ "$PORT" == auto || "$PORT" =~ ^[0-9]+$ ]] || { echo "--port: auto or a number" >&2; exit 2; }
+NAME=${NAME:-om-$USER_NAME} TUNNEL=${TUNNEL:-om-$USER_NAME} WORKER=${WORKER:-om-$USER_NAME}
+LABEL=${LABEL:-$USER_NAME}
+[[ "$LABEL" =~ ^[A-Za-z0-9\ _.-]{1,30}$ ]] || { echo "--label: up to 30 letters, digits, spaces, . _ -" >&2; exit 2; }
 
 STATE_DIR=$HOME/.config/openmessage
 DONE=$STATE_DIR/deploy-$USER_NAME.done
@@ -53,6 +73,22 @@ mkdir -p "$STATE_DIR"
 [ "$RESTART" = no ] || rm -f "$DONE"
 touch "$DONE"
 VMARGS=(--name "$NAME" --zone "$ZONE" --project "$PROJECT")
+PORT_FILE=$STATE_DIR/port-$USER_NAME
+W() { (cd "$HERE/worker" && npx --no-install wrangler "$@"); }
+
+# The client's Workers VPC port: the one its VPC service already has, else the
+# lowest port from 7101 that no VPC service and no unfinished deploy uses.
+pick_port() {
+  local list mine used p
+  list=$(W vpc service list 2>/dev/null) || { echo "Couldn't list Workers VPC services; is Wrangler signed in?" >&2; return 1; }
+  mine=$(awk -F'│' -v n="$WORKER-origin" '{gsub(/ /,"",$3)} $3 == n {print $5}' <<<"$list" | grep -oE '[0-9]+' | head -1 || true)
+  if [ -n "$mine" ]; then echo "$mine"; return 0; fi
+  used=$( { awk -F'│' '{print $5}' <<<"$list" | grep -oE 'HTTP:[0-9]+' | cut -d: -f2;
+            for f in "$STATE_DIR"/port-*; do [ -f "$f" ] && [ "$f" != "$PORT_FILE" ] && cat "$f"; done; } || true)
+  p=7101
+  while grep -qx "$p" <<<"$used"; do p=$((p + 1)); done
+  echo "$p"
+}
 
 done_step() { grep -qx "$1" "$DONE"; }
 mark() { echo "$1" >> "$DONE"; }
@@ -65,7 +101,7 @@ if [ -s "$DONE" ]; then echo "Already done: $(paste -sd, "$DONE"). (--restart to
 header "1/7 This computer"
 "$HERE/doctor.sh" --pre --project "$PROJECT" || {
   echo "Fix the ✗ items above, then run the same command again." >&2; exit 1; }
-echo "Wrangler must be signed in to $USER_NAME's own Cloudflare account (shown above)."
+echo "Wrangler must be signed in to the Cloudflare account that hosts clients (shown above)."
 done_step preflight || { pause "Is that the right Cloudflare account?"; mark preflight; }
 
 if ! done_step project; then
@@ -74,19 +110,27 @@ if ! done_step project; then
   mark project
 fi
 
+if [ "$PORT" = auto ]; then
+  PORT=$(cat "$PORT_FILE" 2>/dev/null || true)
+  [ -n "$PORT" ] || PORT=$(pick_port) || exit 1
+fi
+echo "$PORT" > "$PORT_FILE"
+echo "Names: VM $NAME, tunnel $TUNNEL, Worker $WORKER; Workers VPC port $PORT"
+
 if ! done_step vm; then
   header "3/7 VM and tunnel (about 5 minutes)"
   if gcloud compute instances describe "$NAME" --zone "$ZONE" --project "$PROJECT" --format='value(name)' >/dev/null 2>&1; then
     echo "VM $NAME already exists; keeping it."
+    [ "$PORT" = 7007 ] || "$HERE/vm/create-vm.sh" "${VMARGS[@]}" --origin-port "$PORT"
   else
-    "$HERE/vm/create-vm.sh" "${VMARGS[@]}" --tunnel "$TUNNEL" --release "$RELEASE" ${TIMEZONE:+--timezone "$TIMEZONE"}
+    "$HERE/vm/create-vm.sh" "${VMARGS[@]}" --tunnel "$TUNNEL" --release "$RELEASE" --origin-port "$PORT" ${TIMEZONE:+--timezone "$TIMEZONE"}
   fi
   mark vm
 fi
 
 if ! done_step connector; then
   header "4/7 claude.ai connector"
-  (cd "$HERE/worker" && ./setup-connector.sh --user "$USER_NAME" --email "$EMAIL" --tunnel "$TUNNEL" --auth "$AUTH")
+  (cd "$HERE/worker" && ./setup-connector.sh --user "$USER_NAME" --email "$EMAIL" --tunnel "$TUNNEL" --worker "$WORKER" --port "$PORT" --auth "$AUTH")
   mark connector
 fi
 
@@ -99,19 +143,33 @@ if ! done_step pair; then
   mark pair
 fi
 
+OP_TOPIC_FILE=$STATE_DIR/operator-topic
 if ! done_step alerts; then
   header "6/7 Alerts"
-  "$HERE/vm/set-alerts.sh" "${VMARGS[@]}" | tee "$STATE_DIR/alerts-$USER_NAME.tmp"
+  if [ "$ALERTS" = operator ]; then
+    new_topic=no
+    if [ ! -s "$OP_TOPIC_FILE" ]; then
+      (umask 077; echo "om-$(openssl rand -hex 12)" > "$OP_TOPIC_FILE"); new_topic=yes
+    fi
+    "$HERE/vm/set-alerts.sh" "${VMARGS[@]}" --operator --label "$LABEL" --topic "$(cat "$OP_TOPIC_FILE")" \
+      | { if [ "$new_topic" = yes ]; then cat; else grep -vE '^ +[123]\.|^Keep the topic|^ +\(or open|^ +om-[0-9a-f]{24}$' ; fi; }
+  else
+    "$HERE/vm/set-alerts.sh" "${VMARGS[@]}" --label "$LABEL" | tee "$STATE_DIR/alerts-$USER_NAME.tmp"
+  fi
   mark alerts
 fi
-TOPIC=$(grep -oE 'om-[0-9a-f]{24}' "$STATE_DIR/alerts-$USER_NAME.tmp" 2>/dev/null | head -1 || true)
-rm -f "$STATE_DIR/alerts-$USER_NAME.tmp"
+TOPIC=
+if [ "$ALERTS" = client ]; then
+  TOPIC=$(grep -oE 'om-[0-9a-f]{24}' "$STATE_DIR/alerts-$USER_NAME.tmp" 2>/dev/null | head -1 || true)
+  rm -f "$STATE_DIR/alerts-$USER_NAME.tmp"
+fi
 
 header "7/7 Check"
 URL=$(grep -E '^PUBLIC_URL = "' "$HERE/worker/wrangler.$USER_NAME.toml" | head -1 | cut -d'"' -f2)/mcp
 "$HERE/doctor.sh" "${VMARGS[@]}" --connector "$URL" || echo "(Fix the ✗ items above; the rest of the deploy is done.)"
 "$HERE/doctor.sh" "${VMARGS[@]}" --connector "$URL" --save "$USER_NAME" >/dev/null
 mark checked
+rm -f "$PORT_FILE"   # the VPC service holds the port now
 
 cat <<EOF
 
@@ -121,7 +179,11 @@ Done. Hand over to $USER_NAME (in person or a private message):
      then sign in as $EMAIL$( [ "$AUTH" = access ] && echo " (Cloudflare emails a one-time PIN)" ).
      Add it at claude.ai in a browser signed in to their Claude account; it
      then shows up in the desktop and phone apps too.
-  2. Install the ntfy app and subscribe to the alert topic${TOPIC:+: $TOPIC}
+$( if [ "$ALERTS" = client ]; then
+     echo "  2. Install the ntfy app and subscribe to the alert topic${TOPIC:+: $TOPIC}"
+   else
+     echo "  2. Nothing else to install: alerts for $LABEL come to you (title starts \"$LABEL:\")."
+   fi )
   3. Their guide: cloud/USER-GUIDE.md
 Check on it any time: cloud/doctor.sh --all
 EOF

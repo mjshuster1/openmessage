@@ -63,9 +63,11 @@ if [ "$was" = yes ]; then
   sync
   if [ -r /etc/openmessage/alert.env ]; then
     . /etc/openmessage/alert.env
+    who="Nothing for you to do; tell whoever set this up."
+    [ "${ALERT_AUDIENCE:-client}" = operator ] && who="Check the release before the other VMs take it."
     [ -z "${NTFY_TOPIC:-}" ] || curl -fsS -m 15 -o /dev/null \
       -H "Title: ${ALERT_NAME:-Texts}: update rolled back" -H "Tags: warning" \
-      -d "Update $latest didn't reconnect to Google Messages, so the VM went back to $current. Nothing for you to do; tell whoever set this up." \
+      -d "Update $latest didn't reconnect to Google Messages, so ${ALERT_VM:-the VM} went back to $current. $who" \
       "${NTFY_SERVER:-https://ntfy.sh}/$NTFY_TOPIC" || true
   fi
   exit 1

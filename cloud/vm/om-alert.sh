@@ -8,6 +8,10 @@
 #   NTFY_SERVER=https://ntfy.sh    optional
 #   ALERT_AFTER_MIN=10             optional; minutes disconnected before alerting
 #   ALERT_NAME=Texts               optional; label in the notification title
+#   ALERT_AUDIENCE=client          optional; "operator" when the notices go to
+#                                  whoever runs the service (then they say
+#                                  which VM and the operator's next step)
+#   ALERT_VM=om-mike               optional; VM name for operator notices
 # No config file, no alerts. Notifications carry status only, never message
 # text. A park (blocked, or needs pairing) alerts at once because it won't
 # recover by itself; a plain disconnect waits ALERT_AFTER_MIN.
@@ -26,6 +30,14 @@ CONF=${OM_ALERT_CONF:-/etc/openmessage/alert.env}
 NTFY_SERVER=${NTFY_SERVER:-https://ntfy.sh}
 ALERT_AFTER_MIN=${ALERT_AFTER_MIN:-10}
 ALERT_NAME=${ALERT_NAME:-Texts}
+if [ "${ALERT_AUDIENCE:-client}" = operator ]; then
+  vm=${ALERT_VM:-$(hostname)}
+  FIX_PARKED="With the client's phone in hand, ask Claude Code to reconnect $vm."
+  FIX_DOWN="It usually recovers on its own; if not, ask Claude Code to check $vm."
+else
+  FIX_PARKED="It won't fix itself: tell whoever runs your service (your guide, 'If it stops')."
+  FIX_DOWN="It usually recovers on its own; you'll get another notice if it does."
+fi
 
 sample=$(tail -n 1 "$LOG" 2>/dev/null || true)
 [ -n "$sample" ] || exit 0
@@ -64,10 +76,10 @@ fi
 [ "$pkind" = down ] || { since=$now; notified=0; }
 if [ "$notified" = 0 ]; then
   if [ "$kind" = parked ]; then
-    send "$ALERT_NAME: needs reconnecting" "Google Messages stopped at $(fmt_time "$since") ($reason). It won't fix itself: run the reconnect command once (your guide, 'If it stops')." high warning
+    send "$ALERT_NAME: needs reconnecting" "Google Messages stopped at $(fmt_time "$since") ($reason). $FIX_PARKED" high warning
     notified=1
   elif [ $(( now - since )) -ge $(( ALERT_AFTER_MIN * 60 )) ]; then
-    send "$ALERT_NAME: disconnected" "Google Messages has been down since $(fmt_time "$since") ($reason). It usually recovers on its own; you'll get another notice if it does." default warning
+    send "$ALERT_NAME: disconnected" "Google Messages has been down since $(fmt_time "$since") ($reason). $FIX_DOWN" default warning
     notified=1
   fi
 fi

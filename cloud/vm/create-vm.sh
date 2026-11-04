@@ -5,6 +5,7 @@
 #                         [--repo mjshuster1/openmessage] [--project <id>]
 #                         [--tunnel om-vm | --no-tunnel]
 #                         [--timezone America/New_York]   (default: this computer's)
+#                         [--origin-port 7101]
 #
 # Run it in Cloud Shell or anywhere gcloud is signed in to the project
 # (`gcloud config set project <id>` or --project). It:
@@ -23,6 +24,12 @@
 #      Tunnels, create a tunnel (no public hostname), and copy the long string
 #      after `service install`. The token never goes into metadata, arguments,
 #      files or history.
+#   4. with --origin-port N (not 7007): installs om-origin.socket, a systemd
+#      forwarder from 127.0.0.1:N to OpenMessage on 127.0.0.1:7007. Workers VPC
+#      allows one service per host:port per Cloudflare account, so when several
+#      clients share one account each VM gets its own port (deploy.sh picks it)
+#      and the tunnel reaches OpenMessage through it. Re-running with
+#      --origin-port on an existing VM name only does this step.
 # Pairing comes after: README steps 4-5.
 #
 # Costs: the e2-micro and 30 GB standard disk fall under the Always Free tier
@@ -38,6 +45,7 @@ PROJECT_ARGS=()
 TUNNEL=yes
 TUNNEL_NAME=om-vm
 TIMEZONE=
+ORIGIN_PORT=7007
 while [ $# -gt 0 ]; do
   case "$1" in
     --release) RELEASE=$2; shift 2 ;;
@@ -48,11 +56,13 @@ while [ $# -gt 0 ]; do
     --no-tunnel) TUNNEL=no; shift ;;
     --tunnel) TUNNEL_NAME=$2; shift 2 ;;
     --timezone) TIMEZONE=$2; shift 2 ;;
+    --origin-port) ORIGIN_PORT=$2; shift 2 ;;
     -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
 [ -n "$RELEASE" ] || { echo "--release: latest or a tag (see release-vm.sh)" >&2; exit 2; }
+[[ "$ORIGIN_PORT" =~ ^[0-9]+$ ]] && [ "$ORIGIN_PORT" -ge 1024 ] && [ "$ORIGIN_PORT" -le 65535 ] || { echo "--origin-port: a port number from 1024 to 65535" >&2; exit 2; }
 [[ "$TUNNEL_NAME" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "--tunnel: letters, digits, - and _" >&2; exit 2; }
 HERE=$(cd "$(dirname "$0")" && pwd)
 if [ -z "$TIMEZONE" ]; then
@@ -65,6 +75,43 @@ if [ -z "$TIMEZONE" ] || [ "$TIMEZONE" = UTC ] || [ "$TIMEZONE" = Etc/UTC ]; the
 fi
 [[ "$TIMEZONE" =~ ^[A-Za-z0-9_+/-]+$ ]] || { echo "--timezone: an IANA name like America/New_York" >&2; exit 2; }
 G=(gcloud ${PROJECT_ARGS[@]+"${PROJECT_ARGS[@]}"})
+
+# Forwarder from the client's own port to OpenMessage (see step 4 above).
+install_origin() {
+  [ "$ORIGIN_PORT" != 7007 ] || return 0
+  echo "Forwarder 127.0.0.1:$ORIGIN_PORT -> OpenMessage (127.0.0.1:7007):"
+  "${G[@]}" compute ssh --quiet "$NAME" --zone "$ZONE" -- "set -e
+    sudo tee /etc/systemd/system/om-origin.socket >/dev/null <<'UNIT'
+[Unit]
+Description=Tunnel entry for OpenMessage (forwards to 127.0.0.1:7007)
+
+[Socket]
+ListenStream=127.0.0.1:$ORIGIN_PORT
+
+[Install]
+WantedBy=sockets.target
+UNIT
+    sudo tee /etc/systemd/system/om-origin.service >/dev/null <<'UNIT'
+[Unit]
+Description=Tunnel entry for OpenMessage (forwards to 127.0.0.1:7007)
+Requires=om-origin.socket
+After=om-origin.socket
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:7007
+DynamicUser=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes
+UNIT
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now om-origin.socket >/dev/null 2>&1
+    sudo systemctl restart om-origin.socket
+    echo \"  om-origin.socket: \$(systemctl is-active om-origin.socket), listening on \$(systemctl show -p Listen --value om-origin.socket)\"" </dev/null 2>&1 | { grep -v 'Pseudo-terminal' || true; }
+  "${G[@]}" compute instances add-metadata "$NAME" --zone "$ZONE" --metadata "om-origin-port=$ORIGIN_PORT" >/dev/null
+}
 
 case "$ZONE" in
   us-east1-*|us-central1-*|us-west1-*) ;;
@@ -84,6 +131,11 @@ if ! curl -fsLI -o /dev/null "https://github.com/$REPO/releases/download/$CHECK/
   exit 1
 fi
 if "${G[@]}" compute instances describe "$NAME" --zone "$ZONE" --format='value(name)' >/dev/null 2>&1; then
+  if [ "$ORIGIN_PORT" != 7007 ]; then
+    echo "VM $NAME already exists; only setting up its port."
+    install_origin
+    exit 0
+  fi
   echo "A VM named $NAME already exists in $ZONE. Pick another --name, or upgrade it instead:" >&2
   echo "  gcloud compute instances add-metadata $NAME --zone $ZONE --metadata om-release=<tag> && reboot it" >&2
   exit 1
@@ -166,6 +218,8 @@ if [ "$TUNNEL" = yes ]; then
     echo "Skipped. Install it later from the tunnel's Debian instructions (README step 3)."
   fi
 fi
+
+install_origin
 
 cat <<EOF
 

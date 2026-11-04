@@ -14,9 +14,21 @@ This page puts the steps in order and lists what changes per user. The
 detailed commands are in [`vm/README.md`](vm/README.md) (VM, pairing) and
 [`worker/README.md`](worker/README.md) (Worker); the steps below point to them.
 
+**Hosted on one operator's accounts (the default since 2026-11-04).** The
+operator runs every client's VM in their own Google Cloud (one project per
+client) and every connector in one Cloudflare account. Each client still gets
+their own VM, tunnel, Worker and pairing; `deploy.sh` names them `om-<user>`
+(KV namespace `om-<user>-oauth`) and gives each client its own Workers VPC
+port, from 7101 up, because Cloudflare allows one VPC service per host:port
+per account. A forwarder on the VM (`om-origin.socket`) passes that port to
+OpenMessage on 7007. Alerts go to the operator's one ntfy topic, labelled by
+client, so the client installs nothing. The operator can read every client's
+messages, so the client must know and agree (see the terms).
+
 ## Before you start
 
-**The user needs:**
+**The user needs** (when hosted, the operator supplies the Google Cloud and
+Cloudflare accounts):
 - An **Android phone with Google Messages** as the SMS/RCS app. The Google
   account pairing uses is the one linked in Google Messages (Settings, Device
   pairing). iPhone won't work.
@@ -47,13 +59,20 @@ be signed in to the **user's** accounts for those steps:
 ## The one-command route
 
 From a clone of the repo, with gcloud signed in (an account that can create
-projects and use billing) and Wrangler signed in to the **user's** Cloudflare
-account (`cd cloud/worker && npm ci && npx wrangler login`):
+projects and use billing) and Wrangler signed in to the Cloudflare account
+that hosts the connectors (`cd cloud/worker && npm ci && npx wrangler login`).
+The operator can ask Claude Code to run it; it stops for the steps that need
+a person:
 
 ```bash
 cloud/deploy.sh --user <short-name> --email <their Google email> --project openmessage-<name> \
-  --timezone <their zone, e.g. America/New_York>
+  --label "<first name>" --timezone <their zone, e.g. America/New_York>
 ```
+
+The first deploy creates the operator's alert topic
+(`~/.config/openmessage/operator-topic`) and prints how to subscribe to it in
+the ntfy app; later deploys reuse it. Notices start with the client's
+`--label`. `--alerts client` gives the client their own topic instead.
 
 It runs the steps below in order and stops only where a person is needed:
 the connector's sign-in setup (step 3) and the phone tap (step 4). If any
@@ -80,12 +99,14 @@ claude.ai connector, an Access app, the OAuth client). `--dry-run` only lists;
 
 | Value | Where it goes | From |
 |---|---|---|
-| GCP project, zone, VM name | `deploy.sh` / `create-vm.sh` options | step 1 |
-| Tunnel (name `om-vm` by default) | created by `create-vm.sh` via Wrangler; used by the VPC service | step 1 |
+| GCP project, zone, VM name (`om-<user>`) | `deploy.sh` / `create-vm.sh` options | step 1 |
+| Tunnel (`om-<user>`) | created by `create-vm.sh` via Wrangler; used by the VPC service | step 1 |
+| Workers VPC port (7101 up) | picked by `deploy.sh`; the VPC service and the VM's `om-origin.socket` (`create-vm.sh --origin-port`); metadata `om-origin-port` | step 1 |
+| Worker name (`om-<user>`) | `setup-connector.sh --worker` | step 3 |
 | VPC service id, KV namespace id, `PUBLIC_URL` | `cloud/worker/wrangler.<user>.toml` (written by `setup-connector.sh`) | step 3 |
 | `ALLOWED_EMAIL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Google mode) | Worker secrets (set by `setup-connector.sh`) | step 3 |
 | `AUTH_MODE`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` (Access mode) | `wrangler.<user>.toml` vars (written by `setup-connector.sh --auth access`) | step 3 |
-| ntfy topic | `/etc/openmessage/alert.env` on the VM (set by `set-alerts.sh`) | step 5 |
+| ntfy topic, label | `/etc/openmessage/alert.env` on the VM (set by `set-alerts.sh --operator --label`) | step 5 |
 
 `cloud/worker/wrangler.toml` is the original owner's live config. Don't edit
 it for anyone else. Copy `wrangler.example.toml` to `wrangler.<user>.toml`
@@ -134,8 +155,8 @@ secrets. It stops once to walk you through the one manual step: a Google
 OAuth client (consent screen, then a Web application client with the redirect
 URI it prints). It asks for the client id and secret at hidden prompts. It's
 safe to re-run; it reuses what exists. Cloudflare allows one VPC service per
-`127.0.0.1:<port>` per account, which only matters if the account already has
-one. [`worker/README.md`](worker/README.md) explains the security model.
+`127.0.0.1:<port>` per account, so on a shared account pass the client's own
+`--worker om-<user> --port <their port>` (deploy.sh does). [`worker/README.md`](worker/README.md) explains the security model.
 
 **Coming: `--auth access`.** Instead of a Google OAuth client, Cloudflare
 Access (Managed OAuth, Zero Trust Free plan) does the sign-in, by an emailed
@@ -174,8 +195,11 @@ that's the likely cause.
 cloud/vm/set-alerts.sh
 ```
 
-It turns on push notifications through ntfy and sends a test one. The user
-installs the ntfy app and subscribes to the printed topic (keep it private).
+It turns on push notifications through ntfy and sends a test one. Hosted,
+deploy.sh runs `set-alerts.sh --operator --label <name> --topic <operator
+topic>`, so notices go to the operator and name the client and the next step.
+Otherwise the user installs the ntfy app and subscribes to the printed topic
+(keep it private).
 They get "disconnected" after 10 minutes down, "needs reconnecting" at once
 on a park, and "back online" on recovery. Status only, never message text.
 

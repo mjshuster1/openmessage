@@ -33,7 +33,9 @@ else
   state=$([ "$now_ok" = yes ] && echo "connected now" || echo "NOT connected now")
   share="Connected ${pct}% of the time this week"
   [ "$pct" = "?" ] && share="No status samples this week"
-  body="${synced}${share}, ${state}. If it says not connected, see your guide's 'If it stops'."
+  next="If it says not connected, see your guide's 'If it stops'."
+  [ "${ALERT_AUDIENCE:-client}" = operator ] && next="If it says not connected, ask Claude Code to check ${ALERT_VM:-$(hostname)}."
+  body="${synced}${share}, ${state}. ${next}"
   tags=warning
 fi
 curl -fsS -m 15 -o /dev/null -H "Title: $title" -H "Tags: $tags" -d "$body" \

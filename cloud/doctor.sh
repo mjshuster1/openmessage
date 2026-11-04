@@ -107,6 +107,8 @@ echo "om_active=$(systemctl is-active openmessage 2>/dev/null)"
 echo "cf_active=$(systemctl is-active cloudflared 2>/dev/null)"
 echo "log_timer=$(systemctl is-active om-status-log.timer 2>/dev/null)"
 echo "update_timer=$(systemctl is-active om-update.timer 2>/dev/null)"
+echo "origin=$(systemctl is-active om-origin.socket 2>/dev/null)"
+echo "origin_listen=$(systemctl show -p Listen --value om-origin.socket 2>/dev/null | grep -oE "[0-9.]+:[0-9]+")"
 if [ -n "$st" ]; then
   printf "%s" "$st" | jq -r "\"g_connected=\(.google.connected)\", \"g_pairing=\(.google.needs_pairing)\", \"g_state=\(.google.supervisor.state // \"\")\", \"g_block=\(.google.supervisor.block_reason // \"\")\""
 fi
@@ -114,7 +116,7 @@ js=$(sudo -u openmessage OPENMESSAGES_DATA_DIR=/var/lib/openmessage timeout 20 /
 if [ -n "$js" ]; then
   printf "%s" "$js" | jq -r "\"newest_recv_ms=\([.platforms[].latest_received_ms] | max // 0)\", \"stalled=\([.platforms[] | select(.silence.stalled == true) | .platform] | unique | join(\",\"))\", \"total=\(.total_messages)\""
 fi
-echo "alerts=$( [ -s /etc/openmessage/alert.env ] && echo on || echo off)"
+echo "alerts=$(sudo test -s /etc/openmessage/alert.env && echo on || echo off)"
 log=/var/lib/openmessage/test-status.jsonl
 if [ -r "$log" ] || sudo test -r "$log"; then
   echo "down_24h=$(sudo tail -n 288 "$log" | jq -s "map(select(.up != true or .connected != true)) | length")"
@@ -186,6 +188,15 @@ check_vm() {
     active) ok "cloudflared running" ;;
     *) bad "cloudflared isn't running ($(v cf_active)): claude.ai can't reach the VM"; fix "install the tunnel: cloud/vm/create-vm.sh's tunnel step, or sudo systemctl start cloudflared" ;;
   esac
+  local ol; ol=$(v origin_listen)
+  if [ -n "$ol" ]; then
+    if [ "$(v origin)" = active ] || [ "$(v origin)" = listening ]; then
+      ok "tunnel entry $ol forwards to OpenMessage"
+    else
+      bad "tunnel entry $ol isn't listening ($(v origin)): claude.ai can't reach OpenMessage"
+      fix "cloud/vm/create-vm.sh --name $NAME --zone $ZONE --origin-port ${ol##*:}"
+    fi
+  fi
   [ "$(v log_timer)" = active ] || warn "status log timer isn't running (alerts depend on it)"
   if [ "$(v update_timer)" = active ]; then ok "automatic updates on"; fi
   local disk; disk=$(v disk_pct)

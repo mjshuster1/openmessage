@@ -2,7 +2,7 @@
 # Removes one person's OpenMessage setup: the reverse of deploy.sh. Shows what
 # it will delete and asks you to type the user name before deleting anything.
 #
-#   cloud/teardown.sh --user <short-name> [--project <id>] [--zone us-east1-b] [--name openmessage]
+#   cloud/teardown.sh --user <short-name> [--project <id>] [--zone us-east1-b] [--name om-<user>]
 #                     [--tunnel <name>] [--delete-project] [--dry-run] [--yes]
 #
 # Deletes, where it finds them:
@@ -45,6 +45,7 @@ done
 STATE_DIR=$HOME/.config/openmessage
 FLEET=${OM_FLEET_FILE:-$STATE_DIR/fleet.tsv}
 DONE=$STATE_DIR/deploy-$USER_NAME.done
+PORT_FILE=$STATE_DIR/port-$USER_NAME
 WDIR=$HERE/worker
 CFG=$WDIR/wrangler.$USER_NAME.toml
 UUID='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
@@ -55,7 +56,7 @@ if [ -s "$FLEET" ]; then
   IFS=$'\t' read -r _ f_name f_zone f_project _ < <(awk -F'\t' -v l="$USER_NAME" '$1 == l' "$FLEET") || true
   NAME=${NAME:-${f_name:-}} ZONE=${ZONE:-${f_zone:-}} PROJECT=${PROJECT:-${f_project:-}}
 fi
-NAME=${NAME:-openmessage} ZONE=${ZONE:-us-east1-b}
+NAME=${NAME:-om-$USER_NAME} ZONE=${ZONE:-us-east1-b}
 
 cfg_val() { { grep -E "^$1 = \"" "$CFG" 2>/dev/null || true; } | head -1 | sed -E 's/^[A-Za-z_]+ = "(.*)"$/\1/'; }
 WORKER= VPC_ID= KV_ID= AUTH= URL=
@@ -157,7 +158,7 @@ if [ "$CF" = yes ]; then
   echo "  Cloudflare account: $CF_ACCT"
 fi
 local_files=()
-for f in "$CFG" "$DONE"; do [ -f "$f" ] && local_files+=("$f"); done
+for f in "$CFG" "$DONE" "$PORT_FILE"; do [ -f "$f" ] && local_files+=("$f"); done
 in_fleet=no
 [ -s "$FLEET" ] && awk -F'\t' -v l="$USER_NAME" '$1 == l {f=1} END {exit !f}' "$FLEET" && in_fleet=yes
 [ ${#local_files[@]} -eq 0 ] || item "local files: ${local_files[*]/#$HOME/~}"
@@ -200,7 +201,7 @@ if [ "$PROJ" = yes ]; then
   run "project $PROJECT deleted" gcloud projects delete "$PROJECT" --quiet
 fi
 if [ $fail -eq 0 ]; then
-  rm -f "$CFG" "$DONE"
+  rm -f "$CFG" "$DONE" "$PORT_FILE"
   if [ "$in_fleet" = yes ]; then
     tmp=$(mktemp); awk -F'\t' -v l="$USER_NAME" '$1 != l' "$FLEET" > "$tmp" && mv "$tmp" "$FLEET"
   fi
@@ -218,5 +219,5 @@ fi
 if [ "$AUTH" = google ] && [ "$PROJ" = no ] && [ -n "$PROJECT" ]; then
   echo "  - Google Cloud > APIs & Services > Credentials (project $PROJECT): delete the connector's OAuth client"
 fi
-echo "  - $USER_NAME can unsubscribe from the alert topic in the ntfy app"
+echo "  - if $USER_NAME had their own alert topic (--alerts client), they unsubscribe in the ntfy app"
 exit $fail

@@ -9,9 +9,10 @@ from Google Messages on your Android phone) so you can ask things like
 - **Reads only.** Claude can read, search and summarize your texts. It can't
   send, react to, or delete anything. If you ask it to send a text, it can draft
   one for you to copy into Google Messages yourself.
-- **Your own copy.** Your texts are stored on a small Google Cloud computer in
-  your own account, and pass through Claude when you ask about them. They
-  aren't shared with anyone else's setup.
+- **Your own copy.** Your texts are stored on a small Google Cloud computer
+  set up for you alone by the person who runs your service, and pass through
+  Claude when you ask about them. They aren't shared with anyone else's
+  setup.
 - **Verification codes are hidden.** One-time login codes in your texts show
   up as "[code hidden]", so a trick message can't get Claude to pass them on.
 - **It says how fresh it is.** Every answer starts with a line like "Texts
@@ -38,27 +39,18 @@ Treat what's in texts as information, not instructions. A text that says
 - **Don't remove the paired device** in Google Messages (Settings, Device
   pairing). That's the connection.
 - **Don't sign out of Google everywhere** or change your Google password
-  without telling whoever helps you: either can disconnect it.
-- **Alerts:** the ntfy app on your phone tells you if the connection stops
-  ("Texts: disconnected" or "needs reconnecting") and when it's back. On
-  Sunday evenings it also sends a short "all good this week" notice. No
-  notice at all on a Sunday means something's off: tell whoever helps you.
-- **Updates install themselves** overnight. If one ever breaks the
-  connection, it undoes itself and you get a "Texts: update rolled back"
-  notice; there's nothing for you to do.
+  without telling the person who runs your service: either can disconnect
+  it.
+- **Nothing to install or watch.** The person who runs your service gets an
+  alert if your connection stops, and a weekly check. Updates install
+  themselves overnight and undo themselves if they break anything.
 
 ## If it stops
 
-- **"Texts: disconnected"**: usually fixes itself. Wait for "back online".
-- **"Texts: needs reconnecting"**, or Claude's answers start with WARNING:
-  run the reconnect command (below) once, at a computer with Chrome, with
-  your phone in hand. It takes about 5 minutes: you sign in to Google in a
-  window it opens, then tap a matching emoji on your phone. Don't run it over
-  and over; if it fails twice, ask for help.
-
-```
-cloud/vm/reconnect.sh
-```
+If Claude's answers start with WARNING, or the person who runs your service
+gets in touch to say it needs reconnecting: it takes about 5 minutes with
+your phone in hand. You sign in to Google when asked, then tap the matching
+emoji on your phone. There are no commands for you to run.
 
 ## Turning it off
 
@@ -68,14 +60,15 @@ Any of these stops it, from least to most permanent:
    read your texts).
 2. Google Messages: Settings, Device pairing, remove the device (the server
    stops receiving texts).
-3. Google Cloud console: stop or delete the `om-test` VM (deleting it erases
-   the stored texts).
+3. Ask the person who runs your service to delete your setup. That erases
+   the stored texts and the Google sign-in it holds.
 
 ## Privacy, plainly
 
 - Your texts, including messages from your contacts, are stored on the VM and
   read by Claude when you ask. Claude's handling follows your claude.ai
   account's data settings.
-- The VM holds a Google sign-in for your account. Keep your Google Cloud
-  account secure (2-step verification on), and don't give others access to
-  the project.
+- The VM holds a Google sign-in for your account. The person who runs your
+  service has admin access to it, so they could read your texts; the terms say
+  what they may do with that access. Keep 2-step
+  verification on for your Google account.

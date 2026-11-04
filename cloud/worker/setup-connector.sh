@@ -61,7 +61,7 @@ who=$(W whoami --json 2>/dev/null) || { echo "Wrangler isn't signed in: run npx 
 acct_count=$(json 'd=>d.accounts.length' <<<"$who")
 [ "$acct_count" = 1 ] || { echo "This login sees $acct_count Cloudflare accounts; set CLOUDFLARE_ACCOUNT_ID to the user's and re-run." >&2; [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] || exit 1; }
 echo "Cloudflare account: $(json 'd=>d.accounts[0].name' <<<"$who") ($(json 'd=>d.email' <<<"$who"))"
-read -rp "Is this the user's account? [y/N] " yn; [[ "$yn" == [yY]* ]] || exit 1
+read -rp "Is this the account that should host $USER_NAME's connector? [y/N] " yn; [[ "$yn" == [yY]* ]] || exit 1
 
 echo "1/6 Tunnel '$TUNNEL'  (sign-in: $AUTH)"
 tline=$(W tunnel list 2>/dev/null | grep -E "│ *$UUID *│ *$TUNNEL *│" || true)
