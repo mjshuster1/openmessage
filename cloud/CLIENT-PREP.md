@@ -34,10 +34,12 @@ This is the secure connection between your texts and Claude.
 3. If it asks what you want to do, skip or pick the **Free** plan. No card
    is needed.
 
-## 4. Check Claude (1 minute)
+## 4. Check Claude and Chrome (1 minute)
 
 - You can sign in at **claude.ai** in a web browser, on a paid plan
   (Pro or above) so you can add a connector.
+- Your computer (Mac or Windows) has **Google Chrome**. You'll need it if
+  you ever have to reconnect.
 
 ## 5. For the call itself
 
@@ -59,5 +61,7 @@ shows any messages:
 - **A status link** that shows only "connected or not" and how long ago your
   newest text arrived.
 
-If you ever need help again, you let them back in for that session, and the
-same hand-back runs at the end.
+If Google ever signs your connection out, you'll get an email with a
+**Reconnect link**. You fix it yourself in about 5 minutes on a computer with
+Chrome, phone nearby; no helper needed. For anything else, you let the helper
+back in for that session, and the same hand-back runs at the end.

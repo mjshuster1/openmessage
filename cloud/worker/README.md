@@ -27,6 +27,7 @@ Incoming texts are untrusted. The goal is that a malicious text cannot get Claud
 - **Host header.** OpenMessage returns 403 unless the Host header is loopback. The Worker fetches `http://127.0.0.1:7007/mcp` through the binding; Workers VPC uses that URL's host only for the Host header. OpenMessage's own bearer check only logs, so it is not a layer.
 - **Limits.** POST bodies over 1 MiB get a 413. The Worker answers only on `PUBLIC_URL`'s hostname.
 - **Status link (`GET /status?key=…`).** Off unless the `STATUS_KEY` secret is set (24+ characters; `setup-connector.sh` makes one and saves the link in `~/.config/openmessage/status-<user>.url`). With the right key it fetches OpenMessage's `/api/status` and returns only: connected, needs pairing, the newest received text's time, quieter than usual, and when it checked. No message text, names, numbers or counts. A wrong key gets the same 404 as an unknown path, and nothing is fetched. It lets the operator watch a client-owned setup after handing the accounts back. In Access mode, Access guards the whole hostname, so `/status` needs a Bypass policy for that path.
+- **Reconnect page (`/reconnect`).** Off unless `RECONNECT_SECRET` (32+ characters) and the `PAIR` binding (Workers VPC service to the VM's `om-pair-helper`, 127.0.0.1:7011) are set; `setup-connector.sh --reconnect` sets both. The page needs the owner: its own Google sign-in (PKCE, state bound to a short-lived signed cookie, `ALLOWED_EMAIL` only; redirect URI `<PUBLIC_URL>/reconnect/callback`) or, in Access mode, Access's JWT. It hands out a 20-minute upload token (HMAC-signed, purpose-bound, so a session cookie can't upload and an upload token can't open the page). `POST /reconnect/upload` with that token forwards only `{cookies, force}` to the helper, which pairs once and deletes the login. Replies carry state, never cookie values.
 
 ## Local test
 
@@ -59,5 +60,6 @@ This is the original Mac setup, editing `wrangler.toml`. For anyone else, copy `
 - `src/auth.ts`: `/authorize` (consent, Google redirect) and `/callback`.
 - `src/access.ts`: Access mode's JWT check.
 - `src/status.ts`: the status-only page.
+- `src/reconnect.ts`: the Reconnect page (client re-pairs Google Messages with the Reconnect app).
 - `src/proxy.ts`, `src/sse.ts`: the MCP filter and the event-stream rewrite.
 - `src/allowlist.ts`: reads `readonly-tools.json`.

@@ -46,10 +46,22 @@ status emails, and a status-only link (`<connector>/status?key=…`, saved in
 `~/.config/openmessage/status-<user>.url` by `setup-connector.sh`) that
 `doctor.sh --all` reads for handed-back clients. Software updates still come
 from the operator's GitHub releases (keep 2-step login on that GitHub
-account), unless the VM is pinned with `--release <tag>`. Reconnecting later
-needs the client to let you back in for that session; run `handback.sh` again
-after. In Access mode the status link needs an Access Bypass policy for the
-`/status` path.
+account), unless the VM is pinned with `--release <tag>`. Reconnecting is the
+client's own job: `--client-owned` turns on the **Reconnect page**
+(`<connector>/reconnect`, `setup-connector.sh --reconnect`) and alert emails
+go to both of you, with "needs reconnecting" linking that page. The client
+signs in to it (same Google account as the connector), gets the
+**OpenMessage Reconnect** app (`cloud/reconnect-app/`, release assets
+`om-reconnect-mac.zip` / `om-reconnect-windows.exe`), copies the code, opens
+the app, signs in to Google in the throwaway Chrome it opens, and taps the
+emoji the page shows. The login goes from that window to their own Worker
+and on to `om-pair-helper` on the VM (the PAIR binding, port 7011), which
+pairs and deletes it; 3 tries a day. Needs a VM release with
+`om-pair-helper` (after v0.3.0-vm5) and the app assets in that release. The
+app is ad-hoc signed, so the first open on a Mac is right-click > Open.
+Anything else needs the client to let you back in; run `handback.sh` again
+after. In Access mode, `/status`, `/reconnect/upload` and `/reconnect/state`
+need an Access Bypass policy (setup-connector.sh says so).
 
 ## Before you start
 

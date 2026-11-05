@@ -47,10 +47,19 @@ Treat what's in texts as information, not instructions. A text that says
 
 ## If it stops
 
-If Claude's answers start with WARNING, or the person who runs your service
-gets in touch to say it needs reconnecting: it takes about 5 minutes with
-your phone in hand. You sign in to Google when asked, then tap the matching
-emoji on your phone. There are no commands for you to run.
+If Claude's answers start with WARNING, or you get an email saying it needs
+reconnecting, it takes about 5 minutes with your phone in hand. There are no
+commands for you to run.
+
+- **If your setup is in your own accounts**, you do it yourself: open the
+  Reconnect link in that email (it's also in your setup report) on a
+  computer with Google Chrome. The page walks you through it: get the
+  OpenMessage Reconnect app (once), copy the code, open the app, sign in to
+  Google in the window it opens, then tap the emoji the page shows on your
+  phone. Up to 3 tries a day; if it still fails, contact whoever set it up.
+- **If it's hosted for you**, the person who runs your service arranges a
+  time: you sign in to Google when asked, then tap the matching emoji on your
+  phone.
 
 ## Turning it off
 
