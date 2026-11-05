@@ -26,6 +26,7 @@ install -d -m 700 -o openmessage -g openmessage /var/lib/openmessage
 install -m 755 openmessage /usr/local/bin/openmessage
 install -m 755 om-status-log.sh /usr/local/bin/om-status-log.sh
 install -m 755 om-alert.sh /usr/local/bin/om-alert.sh
+install -m 755 om-notify.sh /usr/local/bin/om-notify
 install -m 755 om-weekly.sh /usr/local/bin/om-weekly.sh
 install -m 755 om-update.sh /usr/local/sbin/om-update
 install -m 755 startup.sh /usr/local/sbin/om-install-release

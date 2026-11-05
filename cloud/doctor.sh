@@ -183,7 +183,7 @@ check_vm() {
     if [ "$down" -le 3 ]; then ok "disconnected $((down * 5)) min in the last 24h"; else warn "disconnected $((down * 5)) min in the last 24h"; fi
   fi
 
-  if [ "$(v alerts)" = on ]; then ok "alerts on"; else warn "alerts off"; fix "cloud/vm/set-alerts.sh --name $NAME --zone $ZONE"; fi
+  if [ "$(v alerts)" = on ]; then ok "alerts on"; else warn "alerts off"; fix "cloud/vm/set-email-alerts.sh --project ${PROJECT:-<id>}, then cloud/vm/set-alerts.sh --name $NAME --zone $ZONE${PROJECT:+ --project $PROJECT} --email"; fi
   case "$(v cf_active)" in
     active) ok "cloudflared running" ;;
     *) bad "cloudflared isn't running ($(v cf_active)): claude.ai can't reach the VM"; fix "install the tunnel: cloud/vm/create-vm.sh's tunnel step, or sudo systemctl start cloudflared" ;;

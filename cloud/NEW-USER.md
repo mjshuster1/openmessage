@@ -21,8 +21,8 @@ their own VM, tunnel, Worker and pairing; `deploy.sh` names them `om-<user>`
 (KV namespace `om-<user>-oauth`) and gives each client its own Workers VPC
 port, from 7101 up, because Cloudflare allows one VPC service per host:port
 per account. A forwarder on the VM (`om-origin.socket`) passes that port to
-OpenMessage on 7007. Alerts go to the operator's one ntfy topic, labelled by
-client, so the client installs nothing. The operator can read every client's
+OpenMessage on 7007. Alerts are emails to the operator, labelled by client,
+so the client installs nothing. The operator can read every client's
 messages, so the client must know and agree (see the terms).
 
 ## Before you start
@@ -69,10 +69,9 @@ cloud/deploy.sh --user <short-name> --email <their Google email> --project openm
   --label "<first name>" --timezone <their zone, e.g. America/New_York>
 ```
 
-The first deploy creates the operator's alert topic
-(`~/.config/openmessage/operator-topic`) and prints how to subscribe to it in
-the ntfy app; later deploys reuse it. Notices start with the client's
-`--label`. `--alerts client` gives the client their own topic instead.
+Alerts are emails from Google Cloud (alerting-noreply@google.com) to the
+account gcloud is signed in as (`--alert-email` for another address), each
+subject starting with the client's `--label`. `--alerts none` skips them.
 
 It runs the steps below in order and stops only where a person is needed:
 the connector's sign-in setup (step 3) and the phone tap (step 4). If any
@@ -106,7 +105,8 @@ claude.ai connector, an Access app, the OAuth client). `--dry-run` only lists;
 | VPC service id, KV namespace id, `PUBLIC_URL` | `cloud/worker/wrangler.<user>.toml` (written by `setup-connector.sh`) | step 3 |
 | `ALLOWED_EMAIL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Google mode) | Worker secrets (set by `setup-connector.sh`) | step 3 |
 | `AUTH_MODE`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` (Access mode) | `wrangler.<user>.toml` vars (written by `setup-connector.sh --auth access`) | step 3 |
-| ntfy topic, label | `/etc/openmessage/alert.env` on the VM (set by `set-alerts.sh --operator --label`) | step 5 |
+| Alert label | `/etc/openmessage/alert.env` on the VM (`set-alerts.sh --email --label`) | step 5 |
+| Alert email address | the "OpenMessage alerts" policy in the client's project (`set-email-alerts.sh`) | step 5 |
 
 `cloud/worker/wrangler.toml` is the original owner's live config. Don't edit
 it for anyone else. Copy `wrangler.example.toml` to `wrangler.<user>.toml`
@@ -192,15 +192,16 @@ that's the likely cause.
 ### 5. Alerts
 
 ```bash
-cloud/vm/set-alerts.sh
+cloud/vm/set-email-alerts.sh --project openmessage-<name>
+cloud/vm/set-alerts.sh --project openmessage-<name> --name om-<user> --email --label "<first name>"
 ```
 
-It turns on push notifications through ntfy and sends a test one. Hosted,
-deploy.sh runs `set-alerts.sh --operator --label <name> --topic <operator
-topic>`, so notices go to the operator and name the client and the next step.
-Otherwise the user installs the ntfy app and subscribes to the printed topic
-(keep it private).
-They get "disconnected" after 10 minutes down, "needs reconnecting" at once
+The first adds, in the client's project, an email channel to the operator and
+the alert policy "OpenMessage alerts". The second makes the VM log each notice
+to Cloud Logging (`om-notify`, log `openmessage-alerts`) and sends a test one.
+The policy turns each logged notice into one email, at most one per 5 minutes,
+usually within a few minutes. Email alerts need release v0.3.0-vm5 or newer
+on the VM. You get "disconnected" after 10 minutes down, "needs reconnecting" at once
 on a park, and "back online" on recovery. Status only, never message text.
 
 ### 6. Connect claude.ai
@@ -227,9 +228,10 @@ Give the user [`USER-GUIDE.md`](USER-GUIDE.md).
 - `cloud/doctor.sh` (one person) or `cloud/doctor.sh --all` (everyone) checks
   everything and prints the fix for anything wrong. `sudo om-score` on the VM
   summarizes uptime from the 5-minute status log.
-- The user's ntfy app also gets a short "all good this week" notice on Sunday
-  evenings, so a quiet week doesn't leave them wondering.
-- If Google parks, the user gets an alert; run `reconnect.sh` once. Don't
+- A short "all good this week" email per client on Sunday evenings, so a
+  quiet week doesn't leave you wondering.
+- If Google parks, you get an alert; run `reconnect.sh` once, with the
+  client's phone in hand. Don't
   loop it: repeated reconnects can get the account throttled.
 - If you set this up from your own machine: remove your SSH key from the
   user's project (`gcloud compute project-info describe` shows `ssh-keys`;

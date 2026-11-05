@@ -18,7 +18,7 @@
 # VM name, zone and project come from the fleet entry if there is one
 # (doctor.sh --all); flags override. Wrangler must be signed in to the user's
 # Cloudflare account. It then lists what to remove by hand (the claude.ai
-# connector, a Cloudflare Access app, the ntfy subscription).
+# connector, a Cloudflare Access app).
 # --tunnel deletes that tunnel even without a Worker config (same in-use check).
 # It keeps a Worker, VPC service or KV namespace that another wrangler*.toml in
 # cloud/worker still uses (it can only see those configs).
@@ -219,5 +219,4 @@ fi
 if [ "$AUTH" = google ] && [ "$PROJ" = no ] && [ -n "$PROJECT" ]; then
   echo "  - Google Cloud > APIs & Services > Credentials (project $PROJECT): delete the connector's OAuth client"
 fi
-echo "  - if $USER_NAME had their own alert topic (--alerts client), they unsubscribe in the ntfy app"
 exit $fail

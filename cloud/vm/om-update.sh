@@ -65,10 +65,9 @@ if [ "$was" = yes ]; then
     . /etc/openmessage/alert.env
     who="Nothing for you to do; tell whoever set this up."
     [ "${ALERT_AUDIENCE:-client}" = operator ] && who="Check the release before the other VMs take it."
-    [ -z "${NTFY_TOPIC:-}" ] || curl -fsS -m 15 -o /dev/null \
-      -H "Title: ${ALERT_NAME:-Texts}: update rolled back" -H "Tags: warning" \
-      -d "Update $latest didn't reconnect to Google Messages, so ${ALERT_VM:-the VM} went back to $current. $who" \
-      "${NTFY_SERVER:-https://ntfy.sh}/$NTFY_TOPIC" || true
+    /usr/local/bin/om-notify "${ALERT_NAME:-Texts}: update rolled back" \
+      "Update $latest didn't reconnect to Google Messages, so ${ALERT_VM:-the VM} went back to $current. $who" \
+      WARNING default warning || true
   fi
   exit 1
 fi

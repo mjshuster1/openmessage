@@ -6,7 +6,7 @@
 #   cloud/deploy.sh --user <short-name> --email <their Google email> --project <new-or-existing-id>
 #                   [--label "Mike"] [--auth google|access] [--zone us-east1-b]
 #                   [--timezone America/New_York] [--release latest]
-#                   [--billing-account <id>] [--alerts operator|client] [--restart]
+#                   [--billing-account <id>] [--alerts email|none] [--alert-email <address>] [--restart]
 #                   [--name om-<user>] [--tunnel om-<user>] [--worker om-<user>] [--port auto]
 #
 # Hosted on the operator's accounts: every client's VM, tunnel and connector
@@ -14,10 +14,11 @@
 # gets its own Workers VPC port (Cloudflare allows one service per host:port
 # per account): --port auto takes the client's existing one, or the lowest
 # free port from 7101 up. The VM forwards that port to OpenMessage.
-# Alerts (--alerts operator, the default) go to the operator's own ntfy topic,
-# kept in ~/.config/openmessage/operator-topic and created the first time,
-# labelled with --label; the client installs nothing. --alerts client makes a
-# topic for the client instead.
+# Alerts (--alerts email, the default) are emails to the operator, from the
+# client's own Google Cloud project: the VM logs each notice and an alert
+# policy there mails it (vm/set-email-alerts.sh, vm/set-alerts.sh --email),
+# labelled with --label. The client installs nothing. --alert-email defaults
+# to the account gcloud is signed in as. --alerts none skips them.
 #
 # Steps (the ones marked * need a person):
 #   1. check this computer (gcloud, Node, Chrome, Wrangler signed in to the hosting Cloudflare)
@@ -26,7 +27,7 @@
 #   4. * claude.ai connector Worker                        (worker/setup-connector.sh)
 #        google: a Google OAuth client; access: turn on Cloudflare Access
 #   5. * pair Google Messages, phone in hand               (vm/reconnect.sh)
-#   6. push alerts, to the operator by default             (vm/set-alerts.sh)
+#   6. email alerts to the operator                        (vm/set-email-alerts.sh, set-alerts.sh)
 #   7. check everything, add to the fleet file             (doctor.sh)
 # Then it prints what to hand over. Before: `gcloud auth login` as an account
 # that may create projects and use the billing account, and `cd cloud/worker &&
@@ -36,7 +37,7 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 USER_NAME= EMAIL= PROJECT= AUTH=google ZONE=us-east1-b NAME= TUNNEL= WORKER= PORT=auto
-TIMEZONE= RELEASE=latest BILLING= RESTART=no LABEL= ALERTS=operator
+TIMEZONE= RELEASE=latest BILLING= RESTART=no LABEL= ALERTS=email ALERT_EMAIL=
 while [ $# -gt 0 ]; do
   case "$1" in
     --user) USER_NAME=$2; shift 2 ;;
@@ -50,18 +51,19 @@ while [ $# -gt 0 ]; do
     --port) PORT=$2; shift 2 ;;
     --label) LABEL=$2; shift 2 ;;
     --alerts) ALERTS=$2; shift 2 ;;
+    --alert-email) ALERT_EMAIL=$2; shift 2 ;;
     --timezone) TIMEZONE=$2; shift 2 ;;
     --release) RELEASE=$2; shift 2 ;;
     --billing-account) BILLING=$2; shift 2 ;;
     --restart) RESTART=yes; shift ;;
-    -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,35p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
 [ -n "$USER_NAME" ] && [ -n "$EMAIL" ] && [ -n "$PROJECT" ] || { echo "--user, --email and --project are required (see --help)" >&2; exit 2; }
 [[ "$USER_NAME" =~ ^[a-z0-9-]+$ ]] || { echo "--user: lowercase letters, digits and - only" >&2; exit 2; }
 [[ "$AUTH" == google || "$AUTH" == access ]] || { echo "--auth: google or access" >&2; exit 2; }
-[[ "$ALERTS" == operator || "$ALERTS" == client ]] || { echo "--alerts: operator or client" >&2; exit 2; }
+[[ "$ALERTS" == email || "$ALERTS" == none ]] || { echo "--alerts: email or none" >&2; exit 2; }
 [[ "$PORT" == auto || "$PORT" =~ ^[0-9]+$ ]] || { echo "--port: auto or a number" >&2; exit 2; }
 NAME=${NAME:-om-$USER_NAME} TUNNEL=${TUNNEL:-om-$USER_NAME} WORKER=${WORKER:-om-$USER_NAME}
 LABEL=${LABEL:-$USER_NAME}
@@ -143,25 +145,15 @@ if ! done_step pair; then
   mark pair
 fi
 
-OP_TOPIC_FILE=$STATE_DIR/operator-topic
 if ! done_step alerts; then
   header "6/7 Alerts"
-  if [ "$ALERTS" = operator ]; then
-    new_topic=no
-    if [ ! -s "$OP_TOPIC_FILE" ]; then
-      (umask 077; echo "om-$(openssl rand -hex 12)" > "$OP_TOPIC_FILE"); new_topic=yes
-    fi
-    "$HERE/vm/set-alerts.sh" "${VMARGS[@]}" --operator --label "$LABEL" --topic "$(cat "$OP_TOPIC_FILE")" \
-      | { if [ "$new_topic" = yes ]; then cat; else grep -vE '^ +[123]\.|^Keep the topic|^ +\(or open|^ +om-[0-9a-f]{24}$' ; fi; }
+  if [ "$ALERTS" = email ]; then
+    "$HERE/vm/set-email-alerts.sh" --project "$PROJECT" ${ALERT_EMAIL:+--email "$ALERT_EMAIL"}
+    "$HERE/vm/set-alerts.sh" "${VMARGS[@]}" --email --label "$LABEL"
   else
-    "$HERE/vm/set-alerts.sh" "${VMARGS[@]}" --label "$LABEL" | tee "$STATE_DIR/alerts-$USER_NAME.tmp"
+    echo "Skipped (--alerts none)."
   fi
   mark alerts
-fi
-TOPIC=
-if [ "$ALERTS" = client ]; then
-  TOPIC=$(grep -oE 'om-[0-9a-f]{24}' "$STATE_DIR/alerts-$USER_NAME.tmp" 2>/dev/null | head -1 || true)
-  rm -f "$STATE_DIR/alerts-$USER_NAME.tmp"
 fi
 
 header "7/7 Check"
@@ -179,11 +171,8 @@ Done. Hand over to $USER_NAME (in person or a private message):
      then sign in as $EMAIL$( [ "$AUTH" = access ] && echo " (Cloudflare emails a one-time PIN)" ).
      Add it at claude.ai in a browser signed in to their Claude account; it
      then shows up in the desktop and phone apps too.
-$( if [ "$ALERTS" = client ]; then
-     echo "  2. Install the ntfy app and subscribe to the alert topic${TOPIC:+: $TOPIC}"
-   else
-     echo "  2. Nothing else to install: alerts for $LABEL come to you (title starts \"$LABEL:\")."
-   fi )
+  2. Nothing else for them to install. Alerts come to you by email
+     (subject starts "$LABEL:").
   3. Their guide: cloud/USER-GUIDE.md
 Check on it any time: cloud/doctor.sh --all
 EOF

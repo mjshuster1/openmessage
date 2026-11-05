@@ -1,12 +1,13 @@
 #!/bin/sh
 # Weekly "all good" notice, so a quiet week of alerts doesn't leave the user
 # wondering. om-weekly.timer runs it Sundays at 6 PM (VM time). Uses the same
-# ntfy config as om-alert.sh; no config, no notice. Status only, no message text.
+# config as om-alert.sh (om-notify delivers it); no config, no notice. Status
+# only, no message text.
 set -eu
 CONF=${OM_ALERT_CONF:-/etc/openmessage/alert.env}
 [ -r "$CONF" ] || exit 0
 . "$CONF"
-[ -n "${NTFY_TOPIC:-}" ] || exit 0
+[ -n "${NTFY_TOPIC:-}" ] || [ "${ALERT_EMAIL:-}" = yes ] || exit 0
 LOG=/var/lib/openmessage/test-status.jsonl
 STATE=/var/lib/openmessage/weekly-total
 
@@ -38,5 +39,5 @@ else
   body="${synced}${share}, ${state}. ${next}"
   tags=warning
 fi
-curl -fsS -m 15 -o /dev/null -H "Title: $title" -H "Tags: $tags" -d "$body" \
-  "${NTFY_SERVER:-https://ntfy.sh}/$NTFY_TOPIC"
+sev=NOTICE; [ "$tags" = warning ] && sev=WARNING
+/usr/local/bin/om-notify "$title" "$body" "$sev" default "$tags"

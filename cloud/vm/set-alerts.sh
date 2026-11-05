@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Turns on push alerts for an OpenMessage VM and sends a test notification.
+# Turns on alerts for an OpenMessage VM and sends a test notice.
 #
 #   cloud/vm/set-alerts.sh [--name om-test] [--zone us-east1-b] [--project <id>]
-#                          [--topic <existing topic>] [--label "Mike"] [--operator] [--off]
+#                          [--email] [--topic <existing topic>] [--label "Mike"] [--operator] [--off]
 #
-# Alerts go through ntfy (ntfy.sh): install the ntfy app (Android or iPhone),
+# --email (what deploy.sh uses): the VM writes each notice to Cloud Logging in
+# its own project and the alert policy there emails the operator. Run
+# set-email-alerts.sh --project <id> first for the policy. Needs om-notify on
+# the VM (release v0.3.0-vm5 on).
+# Without --email, alerts go through ntfy (ntfy.sh): install the ntfy app (Android or iPhone),
 # tap +, and subscribe to the topic this prints. No account is needed. The topic
 # name is the only secret: anyone who knows it can read the alerts. That's why
 # it's long and random, and why alerts carry status only, never message text.
@@ -22,6 +26,7 @@ TOPIC=
 OFF=no
 LABEL=
 AUDIENCE=client
+EMAIL=no
 while [ $# -gt 0 ]; do
   case "$1" in
     --name) NAME=$2; shift 2 ;;
@@ -30,8 +35,9 @@ while [ $# -gt 0 ]; do
     --topic) TOPIC=$2; shift 2 ;;
     --label) LABEL=$2; shift 2 ;;
     --operator) AUDIENCE=operator; shift ;;
+    --email) EMAIL=yes; AUDIENCE=operator; shift ;;
     --off) OFF=yes; shift ;;
-    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -43,7 +49,10 @@ if [ "$OFF" = yes ]; then
   exit 0
 fi
 
-if [ -z "$TOPIC" ]; then
+if [ "$EMAIL" = yes ]; then
+  [ -z "$TOPIC" ] || { echo "--email and --topic don't mix" >&2; exit 2; }
+  TOPIC=none
+elif [ -z "$TOPIC" ]; then
   TOPIC="om-$(openssl rand -hex 12)"
 fi
 case "$TOPIC" in *[!A-Za-z0-9_-]*|"") echo "topic may only use letters, digits, - and _" >&2; exit 2 ;; esac
@@ -62,20 +71,29 @@ fi
 # label and topic can't contain quotes: both are checked above).
 # Line 1 of stdin is the topic; the rest is the file.
 out=$( { printf '%s\n' "$TOPIC"
-         printf "NTFY_TOPIC='%s'\n" "$TOPIC"
+         if [ "$EMAIL" = yes ]; then echo "ALERT_EMAIL='yes'"; else printf "NTFY_TOPIC='%s'\n" "$TOPIC"; fi
          [ -z "$LABEL" ] || printf "ALERT_NAME='%s'\n" "$LABEL"
          printf "ALERT_AUDIENCE='%s'\n" "$AUDIENCE"
          printf "ALERT_VM='%s'\n" "$NAME"; } | ssh_vm "set -e
   read -r topic
   [ -x /usr/local/bin/om-alert.sh ] || { echo 'om-alert.sh is missing on this VM: upgrade it to a newer release first'; exit 1; }
+  if [ \"\$topic\" = none ] && [ ! -x /usr/local/bin/om-notify ]; then echo 'om-notify is missing on this VM: email alerts need release v0.3.0-vm5 or newer'; exit 1; fi
   sudo install -d -m 750 -o root -g openmessage /etc/openmessage
   sudo tee /etc/openmessage/alert.env >/dev/null
   sudo chown root:openmessage /etc/openmessage/alert.env && sudo chmod 640 /etc/openmessage/alert.env
-  curl -fsS -m 15 -o /dev/null -H $(printf %q "Title: $TEST_TITLE") -H 'Tags: bell' \
-    -d $(printf %q "$TEST_BODY") \
-    \"https://ntfy.sh/\$topic\" && echo 'test notification sent'")
+  if [ \"\$topic\" = none ]; then
+    sudo /usr/local/bin/om-notify $(printf %q "$TEST_TITLE") $(printf %q "$TEST_BODY") NOTICE && echo 'test notice sent'
+  else
+    curl -fsS -m 15 -o /dev/null -H $(printf %q "Title: $TEST_TITLE") -H 'Tags: bell' \
+      -d $(printf %q "$TEST_BODY") \
+      \"https://ntfy.sh/\$topic\" && echo 'test notification sent'
+  fi")
 echo "$out"
-grep -q 'test notification sent' <<<"$out" || { echo "Alerts were not set up (see above)." >&2; exit 1; }
+grep -qE 'test (notification|notice) sent' <<<"$out" || { echo "Alerts were not set up (see above)." >&2; exit 1; }
+if [ "$EMAIL" = yes ]; then
+  echo "Email alerts are on for $NAME: the test notice \"$TEST_TITLE\" should arrive by email within a few minutes."
+  exit 0
+fi
 
 cat <<EOF
 

@@ -1,10 +1,11 @@
 #!/bin/sh
-# Push notification when OpenMessage loses Google Messages, and once when it's
-# back. om-status-log.sh runs this after each 5-minute sample.
+# Notice when OpenMessage loses Google Messages, and once when it's back.
+# om-status-log.sh runs this after each 5-minute sample; om-notify delivers it.
 #
 # Config: /etc/openmessage/alert.env (set-alerts.sh writes it), e.g.
-#   NTFY_TOPIC=om-7f3c...          required; a long random name, since anyone
-#                                  who knows an ntfy.sh topic can read it
+#   ALERT_EMAIL=yes                email the operator, through Cloud Logging
+#                                  and the project's alert policy (om-notify.sh)
+#   NTFY_TOPIC=om-7f3c...          or an ntfy push (older setups)
 #   NTFY_SERVER=https://ntfy.sh    optional
 #   ALERT_AFTER_MIN=10             optional; minutes disconnected before alerting
 #   ALERT_NAME=Texts               optional; label in the notification title
@@ -26,8 +27,8 @@ CONF=${OM_ALERT_CONF:-/etc/openmessage/alert.env}
 [ -r "$CONF" ] || exit 0
 # shellcheck disable=SC1090
 . "$CONF"
-[ -n "${NTFY_TOPIC:-}" ] || exit 0
-NTFY_SERVER=${NTFY_SERVER:-https://ntfy.sh}
+[ -n "${NTFY_TOPIC:-}" ] || [ "${ALERT_EMAIL:-}" = yes ] || exit 0
+NOTIFY=${OM_NOTIFY:-/usr/local/bin/om-notify}
 ALERT_AFTER_MIN=${ALERT_AFTER_MIN:-10}
 ALERT_NAME=${ALERT_NAME:-Texts}
 if [ "${ALERT_AUDIENCE:-client}" = operator ]; then
@@ -57,10 +58,9 @@ prev=$(cat "$STATE" 2>/dev/null || echo up)   # up | down <since-epoch> <notifie
 set -- $prev
 pkind=$1; since=${2:-$now}; notified=${3:-0}
 
-send() { # title, message, priority, tags
-  curl -fsS -m 15 -o /dev/null \
-    -H "Title: $1" -H "Priority: $3" -H "Tags: $4" \
-    -d "$2" "$NTFY_SERVER/$NTFY_TOPIC" || echo "om-alert: ntfy send failed" >&2
+send() { # title, message, ntfy priority, ntfy tags
+  sev=WARNING; [ "$4" = white_check_mark ] && sev=NOTICE
+  "$NOTIFY" "$1" "$2" "$sev" "$3" "$4" || echo "om-alert: notice not sent" >&2
 }
 fmt_time() { date -d "@$1" '+%a %H:%M %Z' 2>/dev/null || date -r "$1" '+%a %H:%M %Z'; }
 
