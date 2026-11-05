@@ -1,0 +1,18 @@
+[Unit]
+Description=OpenMessage reconnect helper (re-pairs Google Messages from the Reconnect page)
+After=network-online.target
+
+[Service]
+# Root: it stops and starts openmessage.service around the pairing.
+ExecStart=/usr/bin/python3 -I /usr/local/sbin/om-pair-helper
+Environment=OM_PAIR_PORT=7011
+Restart=on-failure
+RestartSec=30
+RuntimeDirectory=om-pair
+RuntimeDirectoryMode=0700
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=false
+
+[Install]
+WantedBy=multi-user.target

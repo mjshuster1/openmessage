@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 [ -f openmessage ] || { echo "openmessage binary not found here"; exit 1; }
 
 apt-get update -q
-apt-get install -y -q curl jq
+apt-get install -y -q curl jq python3-minimal
 
 # 1 GB swap: the e2-micro has 1 GB of memory.
 if [ ! -f /swapfile ]; then
@@ -30,15 +30,20 @@ install -m 755 om-notify.sh /usr/local/bin/om-notify
 install -m 755 om-weekly.sh /usr/local/bin/om-weekly.sh
 install -m 755 om-update.sh /usr/local/sbin/om-update
 install -m 755 startup.sh /usr/local/sbin/om-install-release
+install -m 755 om-pair-helper.py /usr/local/sbin/om-pair-helper
 # Alert config (set-alerts.sh writes alert.env): root writes, openmessage reads.
 install -d -m 750 -o root -g openmessage /etc/openmessage
 install -m 644 openmessage.service om-status-log.service om-status-log.timer \
-  om-update.service om-update.timer om-weekly.service om-weekly.timer /etc/systemd/system/
+  om-update.service om-update.timer om-weekly.service om-weekly.timer om-pair.service /etc/systemd/system/
 
 systemctl daemon-reload
 systemctl enable openmessage.service
 systemctl enable --now om-status-log.timer om-weekly.timer
 # Daily update check; it does nothing unless metadata om-release=latest.
 systemctl enable --now om-update.timer
+# Reconnect helper, loopback only; the Worker reaches it through its PAIR
+# binding (Workers VPC service on port 7011) when setup-connector.sh made one.
+systemctl enable om-pair.service
+systemctl restart om-pair.service
 
 echo "Done. Next: pair (README step 5), then: systemctl start openmessage"
