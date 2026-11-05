@@ -37,7 +37,7 @@ const LOGIN_TTL_S = 10 * 60;
 const MAX_UPLOAD_BYTES = 64 * 1024;
 const MIN_SECRET = 32;
 export const CODE_PREFIX = "omrc1.";
-const DEFAULT_DOWNLOAD = "https://github.com/mjshuster1/openmessage/releases/latest";
+const DEFAULT_DOWNLOAD = "https://github.com/mjshuster1/openmessage/releases/latest/download";
 
 type Purpose = "session" | "upload" | "login";
 interface Claims {
@@ -259,7 +259,9 @@ async function readState(env: Env): Promise<ReconnectState> {
 const escapeHtml = (v: string) => v.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 function page(env: Env, code: string, st: ReconnectState): string {
-  const download = escapeHtml((env.RECONNECT_DOWNLOAD_URL ?? "").trim() || DEFAULT_DOWNLOAD);
+  const base = ((env.RECONNECT_DOWNLOAD_URL ?? "").trim() || DEFAULT_DOWNLOAD).replace(/\/+$/, "");
+  const mac = escapeHtml(`${base}/om-reconnect-mac.zip`);
+  const win = escapeHtml(`${base}/om-reconnect-windows.exe`);
   const now = st.connected
     ? "✓ Connected right now. You only need this if Claude or an alert says it's disconnected."
     : st.reachable
@@ -281,10 +283,10 @@ button,.btn{font:inherit;padding:.55rem 1rem;border-radius:8px;border:1px solid 
 ${helperNote}
 <ol>
 <li>Have your <strong>phone</strong> nearby, unlocked.</li>
-<li>Download and open the <strong>OpenMessage Reconnect</strong> app: <a class="btn" href="${download}" target="_blank" rel="noopener">Download</a><br>
-<small>The first time, your computer may say it's from an unidentified developer. On a Mac: right-click the app, choose Open, then Open. On Windows: More info, then Run anyway.</small></li>
+<li>Get the <strong>OpenMessage Reconnect</strong> app (once): <a class="btn" href="${mac}">Mac</a> <a class="btn" href="${win}">Windows</a><br>
+<small>Needs Google Chrome. The first time, your computer may say it's from an unidentified developer. On a Mac: open the download, then right-click "OpenMessage Reconnect", choose Open, then Open. On Windows: More info, then Run anyway.</small></li>
 <li><button id="copy">Copy reconnect code</button> <span id="copied"></span><br><small>The app reads it from your clipboard. It works for 20 minutes.</small></li>
-<li>The app opens a private Chrome window. Sign in to the Google account your Google Messages uses, until Google Messages opens. The window then closes by itself.</li>
+<li>Open the app. It opens a private Chrome window. Sign in to the Google account your Google Messages uses, until Google Messages opens. The window then closes by itself.</li>
 <li>Watch this page: when an emoji appears, tap the same one on your phone.</li>
 </ol>
 <div id="live">Waiting for the app…</div>

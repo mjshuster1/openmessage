@@ -5,7 +5,8 @@
 #
 # Assets: openmessage-linux-amd64.tar.gz, openmessage-linux-arm64.tar.gz
 # (the binary, same layout as .github/workflows/release.yml),
-# openmessage-vm.tar.gz (this folder's units and scripts, under vm/) and
+# openmessage-vm.tar.gz (this folder's units and scripts, under vm/), the
+# client Reconnect app (om-reconnect-mac.zip, om-reconnect-windows.exe) and
 # SHA256SUMS. startup.sh downloads these and checks them against SHA256SUMS.
 #
 # Why not just push a tag: the release workflow has never run on the fork
@@ -39,12 +40,15 @@ for arch in amd64 arm64; do
 done
 # Tracked files only, so a stray binary or cookie file in cloud/vm never ships.
 git archive --format=tar --prefix=vm/ HEAD:cloud/vm | gzip -n > "$OUT/openmessage-vm.tar.gz"
-(cd "$OUT" && shasum -a 256 openmessage-linux-amd64.tar.gz openmessage-linux-arm64.tar.gz openmessage-vm.tar.gz > SHA256SUMS)
+# The client's Reconnect app (the Reconnect page links to these by name).
+"$ROOT/cloud/reconnect-app/build.sh" "$OUT" "$TAG"
+(cd "$OUT" && shasum -a 256 openmessage-linux-amd64.tar.gz openmessage-linux-arm64.tar.gz openmessage-vm.tar.gz \
+  om-reconnect-mac.zip om-reconnect-windows.exe > SHA256SUMS)
 cat "$OUT/SHA256SUMS"
 
 gh release create "$TAG" --repo "$REPO" --target "$COMMIT" \
   --title "OpenMessage $TAG (VM)" \
   --notes "Linux binaries and VM files built from $COMMIT for cloud/vm/create-vm.sh. Built locally with cloud/vm/release-vm.sh." \
   "$OUT/openmessage-linux-amd64.tar.gz" "$OUT/openmessage-linux-arm64.tar.gz" \
-  "$OUT/openmessage-vm.tar.gz" "$OUT/SHA256SUMS"
+  "$OUT/openmessage-vm.tar.gz" "$OUT/om-reconnect-mac.zip" "$OUT/om-reconnect-windows.exe" "$OUT/SHA256SUMS"
 echo "Released $TAG on $REPO. Create a VM with: cloud/vm/create-vm.sh --release $TAG"

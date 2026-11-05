@@ -23,7 +23,7 @@ export interface Env {
   STATUS_KEY?: string;
   /** Optional: turns on the Reconnect page (reconnect.ts) with PAIR; signs its cookies and codes. 32+ chars. */
   RECONNECT_SECRET?: string;
-  /** Optional: where the Reconnect page's Download button points. */
+  /** Optional: base URL of the Reconnect app downloads (default: the fork's latest release). */
   RECONNECT_DOWNLOAD_URL?: string;
   /** Optional Workers VPC Service: the VM's om-pair-helper (127.0.0.1:7011). */
   PAIR?: Fetcher;
