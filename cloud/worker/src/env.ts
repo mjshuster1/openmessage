@@ -21,6 +21,12 @@ export interface Env {
   GOOGLE_CLIENT_SECRET: string;
   /** Optional: turns on the status-only page GET /status?key=<STATUS_KEY> (status.ts). */
   STATUS_KEY?: string;
+  /** Optional: turns on the Reconnect page (reconnect.ts) with PAIR; signs its cookies and codes. 32+ chars. */
+  RECONNECT_SECRET?: string;
+  /** Optional: where the Reconnect page's Download button points. */
+  RECONNECT_DOWNLOAD_URL?: string;
+  /** Optional Workers VPC Service: the VM's om-pair-helper (127.0.0.1:7011). */
+  PAIR?: Fetcher;
 }
 
 /** What completeAuthorization() stores and the API handler gets as ctx.props. */

@@ -3,6 +3,7 @@ import { ACCESS_JWT_HEADER, accessConfig, verifyAccessJwt } from "./access";
 import { handleAuth, isAllowedEmail } from "./auth";
 import type { Env, Props } from "./env";
 import { handleMcp } from "./proxy";
+import { RECONNECT_PREFIX, handleReconnect } from "./reconnect";
 import { STATUS_PATH, handleStatus } from "./status";
 
 /** apiHandler: only reached with a valid access token, props decrypted by the provider. */
@@ -69,7 +70,10 @@ export default {
       return new Response("Not found", { status: 404 });
     }
     // Status only (connected? newest text when?), behind its own key; no message data.
-    if (new URL(request.url).pathname === STATUS_PATH) return handleStatus(request, env);
+    const path = new URL(request.url).pathname;
+    if (path === STATUS_PATH) return handleStatus(request, env);
+    // The client re-pairs Google Messages themselves (owner sign-in; see reconnect.ts).
+    if (path === RECONNECT_PREFIX || path.startsWith(`${RECONNECT_PREFIX}/`)) return handleReconnect(request, env);
     const mode = (env.AUTH_MODE ?? "google").trim().toLowerCase();
     if (mode === "access") return accessFetch(request, env);
     if (mode !== "google") return plain(`Unknown AUTH_MODE "${mode}".`, 500);
