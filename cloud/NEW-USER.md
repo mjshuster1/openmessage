@@ -25,6 +25,32 @@ OpenMessage on 7007. Alerts are emails to the operator, labelled by client,
 so the client installs nothing. The operator can read every client's
 messages, so the client must know and agree (see the terms).
 
+**Client-owned (for clients whose texts the operator mustn't see).** Same
+steps, but in the client's own Google Cloud project and Cloudflare account,
+with gcloud and Wrangler signed in as the client on the operator's computer
+during the call. Send the client [`CLIENT-PREP.md`](CLIENT-PREP.md) first (it
+gets their accounts and card ready). Then:
+
+```bash
+cloud/deploy.sh --client-owned --user <short-name> --email <their Google email> \
+  --project openmessage-<name> --label "<first name>" --timezone <zone> --alert-email <your address>
+```
+
+Its last step, [`handback.sh`](handback.sh), removes this computer's SSH key
+from their project and VM, everyone but the client from the project's
+permissions, setup leftovers, and the gcloud and Wrangler sign-ins as the
+client; checks that no account signed in here can open the project; and
+prints a report for the client (also saved in
+`~/.config/openmessage/handback-<user>.txt`). What the operator keeps: the
+status emails, and a status-only link (`<connector>/status?key=…`, saved in
+`~/.config/openmessage/status-<user>.url` by `setup-connector.sh`) that
+`doctor.sh --all` reads for handed-back clients. Software updates still come
+from the operator's GitHub releases (keep 2-step login on that GitHub
+account), unless the VM is pinned with `--release <tag>`. Reconnecting later
+needs the client to let you back in for that session; run `handback.sh` again
+after. In Access mode the status link needs an Access Bypass policy for the
+`/status` path.
+
 ## Before you start
 
 **The user needs** (when hosted, the operator supplies the Google Cloud and

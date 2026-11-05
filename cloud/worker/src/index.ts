@@ -3,6 +3,7 @@ import { ACCESS_JWT_HEADER, accessConfig, verifyAccessJwt } from "./access";
 import { handleAuth, isAllowedEmail } from "./auth";
 import type { Env, Props } from "./env";
 import { handleMcp } from "./proxy";
+import { STATUS_PATH, handleStatus } from "./status";
 
 /** apiHandler: only reached with a valid access token, props decrypted by the provider. */
 const apiHandler = {
@@ -67,6 +68,8 @@ export default {
     if (!publicUrl || new URL(request.url).origin !== new URL(publicUrl).origin) {
       return new Response("Not found", { status: 404 });
     }
+    // Status only (connected? newest text when?), behind its own key; no message data.
+    if (new URL(request.url).pathname === STATUS_PATH) return handleStatus(request, env);
     const mode = (env.AUTH_MODE ?? "google").trim().toLowerCase();
     if (mode === "access") return accessFetch(request, env);
     if (mode !== "google") return plain(`Unknown AUTH_MODE "${mode}".`, 500);

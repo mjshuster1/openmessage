@@ -9,7 +9,9 @@
 #
 # Before: `npx wrangler login` as the user (check `npx wrangler whoami`), the
 # tunnel created and Healthy (create-vm.sh installs it), `npm ci` in this
-# folder. Nothing secret is written to disk or echoed.
+# folder. Nothing secret is written to disk or echoed, except the status-only
+# link (~/.config/openmessage/status-<user>.url), which shows connected or not
+# and the newest text's age, never message data.
 #
 # --auth google (default): the Worker signs the user in with Google. The one
 # manual step is a Google OAuth client; the script says exactly what to
@@ -191,6 +193,17 @@ echo "5/6 Secrets"
 existing=$(W secret list -c "$CFG" 2>/dev/null || true)
 printf '%s' "$EMAIL" | W secret put ALLOWED_EMAIL -c "$CFG" >/dev/null 2>&1
 echo "   ALLOWED_EMAIL set"
+# Status-only page (connected? newest text when?) for the operator, who keeps
+# the link after handing the accounts back. Status only, so it may live on disk.
+STATUS_FILE=$HOME/.config/openmessage/status-$USER_NAME.url
+if ! grep -q STATUS_KEY <<<"$existing" || [ ! -s "$STATUS_FILE" ]; then
+  SKEY=$(openssl rand -hex 24)
+  printf '%s' "$SKEY" | W secret put STATUS_KEY -c "$CFG" >/dev/null 2>&1
+  mkdir -p "$(dirname "$STATUS_FILE")"
+  (umask 077; printf '%s/status?key=%s\n' "$PUBLIC_URL" "$SKEY" > "$STATUS_FILE")
+  unset SKEY
+  echo "   status link saved in $STATUS_FILE"
+fi
 if [ "$AUTH" = access ]; then
   yn=n
 elif grep -q GOOGLE_CLIENT_SECRET <<<"$existing" && grep -q GOOGLE_CLIENT_ID <<<"$existing"; then

@@ -68,7 +68,14 @@ Any of these stops it, from least to most permanent:
 - Your texts, including messages from your contacts, are stored on the VM and
   read by Claude when you ask. Claude's handling follows your claude.ai
   account's data settings.
-- The VM holds a Google sign-in for your account. The person who runs your
-  service has admin access to it, so they could read your texts; the terms say
-  what they may do with that access. Keep 2-step
-  verification on for your Google account.
+- The VM holds a Google sign-in for your account. Keep 2-step verification
+  on for your Google account.
+- **If it's hosted for you** (in the accounts of the person who runs your
+  service): they have admin access to it, so they could read your texts; the
+  terms say what they may do with that access.
+- **If it's in your own accounts** (your own Google Cloud and Cloudflare):
+  setup ended by removing the helper's access and showing you a report of
+  what it removed. They keep only status alerts and a status-only link, which
+  show whether it's connected and how long ago the newest text arrived, never
+  messages. The software still updates itself from their published releases.
+  To get help later, you let them back in for that session.

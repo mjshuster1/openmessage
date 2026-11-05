@@ -15,7 +15,9 @@
 #
 # Fleet file: ~/.config/openmessage/fleet.tsv, one deployment per line:
 #   label <TAB> vm-name <TAB> zone <TAB> project <TAB> connector-url
-# deploy.sh adds each deployment it finishes.
+# deploy.sh adds each deployment it finishes. A deployment handed back to its
+# client (handback.sh, listed in ~/.config/openmessage/handed-back) is checked
+# through its status-only link instead, since this computer has no access.
 # Exit status: 0 when nothing failed (warnings allowed), 1 otherwise.
 set -uo pipefail
 
@@ -253,6 +255,25 @@ if [ "$MODE" = all ]; then
   rc=0
   while IFS=$'\t' read -r label NAME ZONE PROJECT CONNECTOR; do
     [ -n "$label" ] && [ "${label#\#}" = "$label" ] || continue
+    # Handed back to a client (handback.sh): no access any more, so ask the
+    # status-only link instead of the VM.
+    if grep -qx "$label" "$(dirname "$FLEET")/handed-back" 2>/dev/null; then
+      sfile=$(dirname "$FLEET")/status-$label.url
+      if [ ! -s "$sfile" ]; then
+        printf '%s %-12s client-owned; no status link (re-run cloud/worker/setup-connector.sh with their OK)\n' "$WARN" "$label"; continue
+      fi
+      sj=$(curl -s -m 15 "$(head -1 "$sfile")&format=json" 2>/dev/null)
+      if ! jq -e . >/dev/null 2>&1 <<<"$sj"; then
+        printf '%s %-12s client-owned; status link did not answer\n' "$BAD" "$label"; rc=1; continue
+      fi
+      sg=$(jq -r 'if .reachable != true then "not answering" elif .needs_pairing == true then "needs reconnect" elif .connected == true then "connected" else "disconnected" end' <<<"$sj")
+      age=$(jq -r 'if .newest_text_ms then ((.checked_ms - .newest_text_ms) / 1000 | floor) else "" end' <<<"$sj")
+      sn=$( [ -n "$age" ] && echo "text $(ago "$age") ago" || echo "no texts")
+      mark=$OK; [ "$(jq -r .ok <<<"$sj")" = true ] || { mark=$BAD; rc=1; }
+      [ "$mark" = "$OK" ] && [ "$(jq -r .quieter_than_usual <<<"$sj")" = true ] && mark=$WARN
+      printf '%s %-12s %-14s %-16s %-14s (client-owned, status link)\n' "$mark" "$label" "$sg" "$sn" "auto-updates"
+      continue
+    fi
     SUMMARY_G='?'; SUMMARY_NEW='?'; SUMMARY_REL='?'; SUMMARY_C='-'; FAILS=0
     report=$( { check_vm; check_connector; echo "FAILS=$FAILS"; echo "SUM=$SUMMARY_G|$SUMMARY_NEW|$SUMMARY_REL|$SUMMARY_C"; } </dev/null 2>&1)
     f=$(grep '^FAILS=' <<<"$report" | cut -d= -f2)

@@ -19,6 +19,8 @@ export interface Env {
   // Google mode only
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
+  /** Optional: turns on the status-only page GET /status?key=<STATUS_KEY> (status.ts). */
+  STATUS_KEY?: string;
 }
 
 /** What completeAuthorization() stores and the API handler gets as ctx.props. */

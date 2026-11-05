@@ -26,6 +26,7 @@ Incoming texts are untrusted. The goal is that a malicious text cannot get Claud
 - **Access mode (`AUTH_MODE = "access"`).** Cloudflare Access with Managed OAuth sits in front of the workers.dev route and handles discovery, client registration, sign-in (one-time PIN) and tokens; the Worker serves only `/mcp` and none of its own OAuth endpoints, and needs no KV or Google client. It still verifies the `Cf-Access-Jwt-Assertion` JWT on every call (signature against the team's published keys, issuer, the app's AUD tag, expiry, email equal to `ALLOWED_EMAIL`), so Access switched off, a loose policy, or a preview URL Access doesn't cover fails closed. `src/access.ts`; `setup-connector.sh --auth access` sets it up.
 - **Host header.** OpenMessage returns 403 unless the Host header is loopback. The Worker fetches `http://127.0.0.1:7007/mcp` through the binding; Workers VPC uses that URL's host only for the Host header. OpenMessage's own bearer check only logs, so it is not a layer.
 - **Limits.** POST bodies over 1 MiB get a 413. The Worker answers only on `PUBLIC_URL`'s hostname.
+- **Status link (`GET /status?key=…`).** Off unless the `STATUS_KEY` secret is set (24+ characters; `setup-connector.sh` makes one and saves the link in `~/.config/openmessage/status-<user>.url`). With the right key it fetches OpenMessage's `/api/status` and returns only: connected, needs pairing, the newest received text's time, quieter than usual, and when it checked. No message text, names, numbers or counts. A wrong key gets the same 404 as an unknown path, and nothing is fetched. It lets the operator watch a client-owned setup after handing the accounts back. In Access mode, Access guards the whole hostname, so `/status` needs a Bypass policy for that path.
 
 ## Local test
 
@@ -57,5 +58,6 @@ This is the original Mac setup, editing `wrangler.toml`. For anyone else, copy `
 - `src/index.ts`: builds the OAuth provider, checks the hostname and email, routes `/mcp`.
 - `src/auth.ts`: `/authorize` (consent, Google redirect) and `/callback`.
 - `src/access.ts`: Access mode's JWT check.
+- `src/status.ts`: the status-only page.
 - `src/proxy.ts`, `src/sse.ts`: the MCP filter and the event-stream rewrite.
 - `src/allowlist.ts`: reads `readonly-tools.json`.

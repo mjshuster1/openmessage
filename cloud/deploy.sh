@@ -8,6 +8,14 @@
 #                   [--timezone America/New_York] [--release latest]
 #                   [--billing-account <id>] [--alerts email|none] [--alert-email <address>] [--restart]
 #                   [--name om-<user>] [--tunnel om-<user>] [--worker om-<user>] [--port auto]
+#                   [--client-owned]
+#
+# --client-owned: everything goes in the client's OWN Google Cloud and
+# Cloudflare accounts (gcloud and Wrangler signed in as the client), so the
+# operator can't read their texts afterwards. Needs --alert-email (the
+# operator's address; gcloud is signed in as the client). Its last step runs
+# handback.sh, which removes this computer's access and prints a report for
+# the client. Later checks go through the status-only link (doctor.sh --all).
 #
 # Hosted on the operator's accounts: every client's VM, tunnel and connector
 # Worker is named om-<user> (KV namespace om-<user>-oauth), and each client
@@ -37,7 +45,7 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 USER_NAME= EMAIL= PROJECT= AUTH=google ZONE=us-east1-b NAME= TUNNEL= WORKER= PORT=auto
-TIMEZONE= RELEASE=latest BILLING= RESTART=no LABEL= ALERTS=email ALERT_EMAIL=
+TIMEZONE= RELEASE=latest BILLING= RESTART=no LABEL= ALERTS=email ALERT_EMAIL= CLIENT_OWNED=no
 while [ $# -gt 0 ]; do
   case "$1" in
     --user) USER_NAME=$2; shift 2 ;;
@@ -56,7 +64,8 @@ while [ $# -gt 0 ]; do
     --release) RELEASE=$2; shift 2 ;;
     --billing-account) BILLING=$2; shift 2 ;;
     --restart) RESTART=yes; shift ;;
-    -h|--help) sed -n '2,35p' "$0"; exit 0 ;;
+    --client-owned) CLIENT_OWNED=yes; shift ;;
+    -h|--help) sed -n '2,43p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -65,6 +74,9 @@ done
 [[ "$AUTH" == google || "$AUTH" == access ]] || { echo "--auth: google or access" >&2; exit 2; }
 [[ "$ALERTS" == email || "$ALERTS" == none ]] || { echo "--alerts: email or none" >&2; exit 2; }
 [[ "$PORT" == auto || "$PORT" =~ ^[0-9]+$ ]] || { echo "--port: auto or a number" >&2; exit 2; }
+if [ "$CLIENT_OWNED" = yes ] && [ "$ALERTS" = email ] && [ -z "$ALERT_EMAIL" ]; then
+  echo "--client-owned needs --alert-email <your address> (gcloud is signed in as the client)" >&2; exit 2
+fi
 NAME=${NAME:-om-$USER_NAME} TUNNEL=${TUNNEL:-om-$USER_NAME} WORKER=${WORKER:-om-$USER_NAME}
 LABEL=${LABEL:-$USER_NAME}
 [[ "$LABEL" =~ ^[A-Za-z0-9\ _.-]{1,30}$ ]] || { echo "--label: up to 30 letters, digits, spaces, . _ -" >&2; exit 2; }
@@ -103,8 +115,13 @@ if [ -s "$DONE" ]; then echo "Already done: $(paste -sd, "$DONE"). (--restart to
 header "1/7 This computer"
 "$HERE/doctor.sh" --pre --project "$PROJECT" || {
   echo "Fix the ✗ items above, then run the same command again." >&2; exit 1; }
-echo "Wrangler must be signed in to the Cloudflare account that hosts clients (shown above)."
-done_step preflight || { pause "Is that the right Cloudflare account?"; mark preflight; }
+if [ "$CLIENT_OWNED" = yes ]; then
+  echo "Client-owned: gcloud and Wrangler (shown above) must both be signed in as $USER_NAME, not you."
+  done_step preflight || { pause "Are both $USER_NAME's own accounts?"; mark preflight; }
+else
+  echo "Wrangler must be signed in to the Cloudflare account that hosts clients (shown above)."
+  done_step preflight || { pause "Is that the right Cloudflare account?"; mark preflight; }
+fi
 
 if ! done_step project; then
   header "2/7 Google Cloud project"
@@ -162,6 +179,29 @@ URL=$(grep -E '^PUBLIC_URL = "' "$HERE/worker/wrangler.$USER_NAME.toml" | head -
 "$HERE/doctor.sh" "${VMARGS[@]}" --connector "$URL" --save "$USER_NAME" >/dev/null
 mark checked
 rm -f "$PORT_FILE"   # the VPC service holds the port now
+STATUS_FILE=$HOME/.config/openmessage/status-$USER_NAME.url
+
+if [ "$CLIENT_OWNED" = yes ]; then
+  cat <<EOF
+
+Next: $USER_NAME adds the connector in claude.ai (in a browser, signed in to
+their Claude account):
+  URL: $URL
+  then sign in as $EMAIL$( [ "$AUTH" = access ] && echo " (Cloudflare emails a one-time PIN)" ).
+Check together that "what are my last three texts?" works.
+EOF
+  pause "Once that works, hand the accounts back."
+  header "8/8 Hand back"
+  "$HERE/handback.sh" --user "$USER_NAME" --email "$EMAIL" --project "$PROJECT" --zone "$ZONE" --name "$NAME" \
+    || echo "(Fix the ✗ items above, then run cloud/handback.sh again with the same options.)"
+  cat <<EOF
+
+Done. Give $USER_NAME their guide (cloud/USER-GUIDE.md) and the report above.
+Alerts come to $ALERT_EMAIL (subject starts "$LABEL:").
+Check on it any time: cloud/doctor.sh --all$( [ -s "$STATUS_FILE" ] && echo ", or the status link in $STATUS_FILE")
+EOF
+  exit 0
+fi
 
 cat <<EOF
 
