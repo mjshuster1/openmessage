@@ -6,6 +6,7 @@
 #   cloud/worker/setup-connector.sh --user <short-name> --email <email>
 #                                   [--auth google|access] [--access-aud <AUD tag>]
 #                                   [--tunnel om-vm] [--worker openmessage-connector] [--port 7007]
+#                                   [--reconnect [--pair-port 7011]]
 #
 # Before: `npx wrangler login` as the user (check `npx wrangler whoami`), the
 # tunnel created and Healthy (create-vm.sh installs it), `npm ci` in this
@@ -21,6 +22,14 @@
 # Access on for the Worker in the dashboard; the script stops, says what to
 # click, and checks it. Re-run after a manual step if it exits.
 #
+# --reconnect turns on the Reconnect page (<connector>/reconnect), so the
+# client re-pairs Google Messages themselves with the Reconnect app: a second
+# VPC service ('<worker>-pair', the VM's om-pair-helper on 127.0.0.1:7011)
+# bound as PAIR, and the RECONNECT_SECRET secret. Google mode also needs the
+# redirect URI <connector>/reconnect/callback on the OAuth client (it says
+# so). deploy.sh --client-owned passes it; one VPC service per host:port per
+# account means only one client per Cloudflare account can use port 7011.
+#
 # Writes wrangler.<user>.toml here (git ignores it). Prints the connector URL
 # to add in claude.ai.
 set -euo pipefail
@@ -32,6 +41,8 @@ WORKER=openmessage-connector
 PORT=7007
 AUTH=google
 ACCESS_AUD=
+RECONNECT=no
+PAIR_PORT=7011
 while [ $# -gt 0 ]; do
   case "$1" in
     --user) USER_NAME=$2; shift 2 ;;
@@ -41,7 +52,9 @@ while [ $# -gt 0 ]; do
     --port) PORT=$2; shift 2 ;;   # OpenMessage's port on the VM; Cloudflare allows one service per host:port per account
     --auth) AUTH=$2; shift 2 ;;
     --access-aud) ACCESS_AUD=$2; shift 2 ;;
-    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+    --reconnect) RECONNECT=yes; shift ;;
+    --pair-port) PAIR_PORT=$2; shift 2 ;;
+    -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -85,6 +98,22 @@ if [ -z "$VPC_ID" ]; then
 fi
 echo "   $VPC_ID"
 
+PAIR_ID=
+if [ "$RECONNECT" = yes ]; then
+  echo "   + VPC service '$WORKER-pair' (Reconnect page -> VM port $PAIR_PORT)"
+  PAIR_ID=$(W vpc service list 2>/dev/null | grep -E "│ *$UUID *│ *$WORKER-pair *│" | grep -oE "$UUID" | head -1 || true)
+  if [ -z "$PAIR_ID" ]; then
+    out=$(W vpc service create "$WORKER-pair" --type http --tunnel-id "$TUNNEL_ID" --ipv4 127.0.0.1 --http-port "$PAIR_PORT" 2>&1 || true)
+    PAIR_ID=$( { grep -oE "$UUID" <<<"$out" || true; } | { grep -v "$TUNNEL_ID" || true; } | head -1)
+    if [ -z "$PAIR_ID" ]; then
+      echo "$out" | grep -vE '^\s*$|Logs were written|open an issue' >&2
+      echo "Creating the pair VPC service failed (above). Another service in this account may already use 127.0.0.1:$PAIR_PORT." >&2
+      exit 1
+    fi
+  fi
+  echo "     $PAIR_ID"
+fi
+
 KV_ID=
 if [ "$AUTH" = google ]; then
   echo "3/6 KV namespace '$WORKER-oauth'"
@@ -119,6 +148,9 @@ write_cfg() { # $1 = PUBLIC_URL; also uses AUTH, TEAM, ACCESS_AUD
       -e "s|^ACCESS_AUD = \".*\"|ACCESS_AUD = \"$ACCESS_AUD\"|" \
       -e "$drop" \
       wrangler.example.toml > "$CFG"
+  if [ -n "$PAIR_ID" ]; then
+    printf '\n# Reconnect page: the VM'"'"'s om-pair-helper (setup-connector.sh --reconnect).\n[[vpc_services]]\nbinding = "PAIR"\nservice_id = "%s"\n' "$PAIR_ID" >> "$CFG"
+  fi
 }
 
 echo "4/6 First deploy (learns the workers.dev address)"
@@ -204,6 +236,10 @@ if ! grep -q STATUS_KEY <<<"$existing" || [ ! -s "$STATUS_FILE" ]; then
   unset SKEY
   echo "   status link saved in $STATUS_FILE"
 fi
+if [ "$RECONNECT" = yes ] && ! grep -q RECONNECT_SECRET <<<"$existing"; then
+  openssl rand -hex 32 | tr -d '\n' | W secret put RECONNECT_SECRET -c "$CFG" >/dev/null 2>&1
+  echo "   RECONNECT_SECRET set"
+fi
 if [ "$AUTH" = access ]; then
   yn=n
 elif grep -q GOOGLE_CLIENT_SECRET <<<"$existing" && grep -q GOOGLE_CLIENT_ID <<<"$existing"; then
@@ -220,7 +256,7 @@ if [[ "$yn" == [yY]* ]]; then
         "OpenMessage connector"; add $EMAIL as a test user).
      b. APIs & Services > Credentials > Create credentials > OAuth client ID:
         type "Web application", authorized redirect URI exactly:
-          $PUBLIC_URL/callback
+          $PUBLIC_URL/callback$( [ "$RECONNECT" = yes ] && printf '\n        and a second one:\n          %s/reconnect/callback' "$PUBLIC_URL")
      c. Copy the client ID and secret and paste them here.
 EOF
   read -rp "   Client ID: " CID
@@ -241,6 +277,22 @@ if [ "$AUTH" = access ]; then
   access_probe
   [ "$PROBE" = managed ] || echo "   warning: Access with Managed OAuth isn't answering in front of the Worker now; re-run to check." >&2
   how="sign in with $EMAIL (Cloudflare emails a one-time PIN)"
+fi
+
+if [ "$RECONNECT" = yes ]; then
+  RC_FILE=$HOME/.config/openmessage/reconnect-$USER_NAME.url
+  mkdir -p "$(dirname "$RC_FILE")"
+  echo "$PUBLIC_URL/reconnect" > "$RC_FILE"
+  if [ "$AUTH" = google ] && [ "${yn:-y}" != y ] && [ "${yn:-y}" != Y ]; then
+    echo "   Reconnect page: make sure the Google OAuth client also lists the redirect URI"
+    echo "     $PUBLIC_URL/reconnect/callback"
+  fi
+  if [ "$AUTH" = access ]; then
+    echo "   Reconnect page with Access: add a Bypass policy (Everyone) for the paths"
+    echo "     /reconnect/upload, /reconnect/state and /status on this Worker's Access application;"
+    echo "     /reconnect itself stays behind Access (that's the sign-in)."
+  fi
+  echo "   Reconnect page: $PUBLIC_URL/reconnect  (saved in $RC_FILE)"
 fi
 
 cat <<EOF

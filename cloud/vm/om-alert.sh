@@ -13,6 +13,10 @@
 #                                  whoever runs the service (then they say
 #                                  which VM and the operator's next step)
 #   ALERT_VM=om-mike               optional; VM name for operator notices
+#   ALERT_RECONNECT_URL=https://…/reconnect
+#                                  optional; the client's Reconnect page. When
+#                                  set, a "needs reconnecting" notice says to
+#                                  open it (the client can do it themselves)
 # No config file, no alerts. Notifications carry status only, never message
 # text. A park (blocked, or needs pairing) alerts at once because it won't
 # recover by itself; a plain disconnect waits ALERT_AFTER_MIN.
@@ -38,6 +42,9 @@ if [ "${ALERT_AUDIENCE:-client}" = operator ]; then
 else
   FIX_PARKED="It won't fix itself: tell whoever runs your service (your guide, 'If it stops')."
   FIX_DOWN="It usually recovers on its own; you'll get another notice if it does."
+fi
+if [ -n "${ALERT_RECONNECT_URL:-}" ]; then
+  FIX_PARKED="It won't fix itself. To reconnect, open $ALERT_RECONNECT_URL on a computer with Google Chrome, with the phone nearby (about 5 minutes)."
 fi
 
 sample=$(tail -n 1 "$LOG" 2>/dev/null || true)

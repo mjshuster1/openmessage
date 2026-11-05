@@ -3,6 +3,7 @@
 #
 #   cloud/vm/set-alerts.sh [--name om-test] [--zone us-east1-b] [--project <id>]
 #                          [--email] [--topic <existing topic>] [--label "Mike"] [--operator] [--off]
+#                          [--reconnect-url https://<connector>/reconnect]
 #
 # --email (what deploy.sh uses): the VM writes each notice to Cloud Logging in
 # its own project and the alert policy there emails the operator. Run
@@ -16,6 +17,8 @@
 # --operator: the notices go to whoever runs the service, not the client, so
 # they say which client and what to do as the operator. deploy.sh passes it
 # with the operator's one topic for all clients.
+# --reconnect-url: the client's Reconnect page; "needs reconnecting" notices
+# then point to it (deploy.sh --client-owned passes it).
 # --off removes the config (alerts stop; nothing else changes).
 set -euo pipefail
 
@@ -27,6 +30,7 @@ OFF=no
 LABEL=
 AUDIENCE=client
 EMAIL=no
+RECONNECT_URL=
 while [ $# -gt 0 ]; do
   case "$1" in
     --name) NAME=$2; shift 2 ;;
@@ -37,7 +41,8 @@ while [ $# -gt 0 ]; do
     --operator) AUDIENCE=operator; shift ;;
     --email) EMAIL=yes; AUDIENCE=operator; shift ;;
     --off) OFF=yes; shift ;;
-    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+    --reconnect-url) RECONNECT_URL=$2; shift 2 ;;
+    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -57,6 +62,7 @@ elif [ -z "$TOPIC" ]; then
 fi
 case "$TOPIC" in *[!A-Za-z0-9_-]*|"") echo "topic may only use letters, digits, - and _" >&2; exit 2 ;; esac
 [ -z "$LABEL" ] || [[ "$LABEL" =~ ^[A-Za-z0-9\ _.-]{1,30}$ ]] || { echo "--label: up to 30 letters, digits, spaces, . _ -" >&2; exit 2; }
+[ -z "$RECONNECT_URL" ] || [[ "$RECONNECT_URL" =~ ^https://[A-Za-z0-9.-]+/reconnect$ ]] || { echo "--reconnect-url: https://<host>/reconnect" >&2; exit 2; }
 TITLE=${LABEL:-Texts}
 if [ "$AUDIENCE" = operator ]; then
   TEST_TITLE="$TITLE: alerts are on"
@@ -74,7 +80,8 @@ out=$( { printf '%s\n' "$TOPIC"
          if [ "$EMAIL" = yes ]; then echo "ALERT_EMAIL='yes'"; else printf "NTFY_TOPIC='%s'\n" "$TOPIC"; fi
          [ -z "$LABEL" ] || printf "ALERT_NAME='%s'\n" "$LABEL"
          printf "ALERT_AUDIENCE='%s'\n" "$AUDIENCE"
-         printf "ALERT_VM='%s'\n" "$NAME"; } | ssh_vm "set -e
+         printf "ALERT_VM='%s'\n" "$NAME"
+         [ -z "$RECONNECT_URL" ] || printf "ALERT_RECONNECT_URL='%s'\n" "$RECONNECT_URL"; } | ssh_vm "set -e
   read -r topic
   [ -x /usr/local/bin/om-alert.sh ] || { echo 'om-alert.sh is missing on this VM: upgrade it to a newer release first'; exit 1; }
   if [ \"\$topic\" = none ] && [ ! -x /usr/local/bin/om-notify ]; then echo 'om-notify is missing on this VM: email alerts need release v0.3.0-vm5 or newer'; exit 1; fi

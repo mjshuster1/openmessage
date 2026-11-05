@@ -149,7 +149,8 @@ fi
 
 if ! done_step connector; then
   header "4/7 claude.ai connector"
-  (cd "$HERE/worker" && ./setup-connector.sh --user "$USER_NAME" --email "$EMAIL" --tunnel "$TUNNEL" --worker "$WORKER" --port "$PORT" --auth "$AUTH")
+  (cd "$HERE/worker" && ./setup-connector.sh --user "$USER_NAME" --email "$EMAIL" --tunnel "$TUNNEL" --worker "$WORKER" --port "$PORT" --auth "$AUTH" \
+     $( [ "$CLIENT_OWNED" = yes ] && echo --reconnect ))
   mark connector
 fi
 
@@ -165,8 +166,15 @@ fi
 if ! done_step alerts; then
   header "6/7 Alerts"
   if [ "$ALERTS" = email ]; then
-    "$HERE/vm/set-email-alerts.sh" --project "$PROJECT" ${ALERT_EMAIL:+--email "$ALERT_EMAIL"}
-    "$HERE/vm/set-alerts.sh" "${VMARGS[@]}" --email --label "$LABEL"
+    if [ "$CLIENT_OWNED" = yes ]; then
+      # Both of you get them; "needs reconnecting" points at the client's Reconnect page.
+      RC_URL=$(head -1 "$STATE_DIR/reconnect-$USER_NAME.url" 2>/dev/null || true)
+      "$HERE/vm/set-email-alerts.sh" --project "$PROJECT" --email "$ALERT_EMAIL" --email "$EMAIL"
+      "$HERE/vm/set-alerts.sh" "${VMARGS[@]}" --email --label "$LABEL" ${RC_URL:+--reconnect-url "$RC_URL"}
+    else
+      "$HERE/vm/set-email-alerts.sh" --project "$PROJECT" ${ALERT_EMAIL:+--email "$ALERT_EMAIL"}
+      "$HERE/vm/set-alerts.sh" "${VMARGS[@]}" --email --label "$LABEL"
+    fi
   else
     echo "Skipped (--alerts none)."
   fi
@@ -197,7 +205,10 @@ EOF
   cat <<EOF
 
 Done. Give $USER_NAME their guide (cloud/USER-GUIDE.md) and the report above.
-Alerts come to $ALERT_EMAIL (subject starts "$LABEL:").
+Alerts come to $ALERT_EMAIL and $EMAIL (subject starts "$LABEL:"). If Google
+signs it out, the email links to their Reconnect page:
+  $(head -1 "$STATE_DIR/reconnect-$USER_NAME.url" 2>/dev/null || echo "(not set up)")
+They need the Reconnect app (on that page) and Google Chrome; no help from you.
 Check on it any time: cloud/doctor.sh --all$( [ -s "$STATUS_FILE" ] && echo ", or the status link in $STATUS_FILE")
 EOF
   exit 0

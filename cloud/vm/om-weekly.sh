@@ -36,6 +36,7 @@ else
   [ "$pct" = "?" ] && share="No status samples this week"
   next="If it says not connected, see your guide's 'If it stops'."
   [ "${ALERT_AUDIENCE:-client}" = operator ] && next="If it says not connected, ask Claude Code to check ${ALERT_VM:-$(hostname)}."
+  [ -z "${ALERT_RECONNECT_URL:-}" ] || next="If it stays not connected, reconnect at ${ALERT_RECONNECT_URL} (a computer with Google Chrome, phone nearby)."
   body="${synced}${share}, ${state}. ${next}"
   tags=warning
 fi
