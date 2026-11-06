@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 [ -f openmessage ] || { echo "openmessage binary not found here"; exit 1; }
 
 apt-get update -q
-apt-get install -y -q curl jq python3-minimal
+apt-get install -y -q curl jq python3
 
 # 1 GB swap: the e2-micro has 1 GB of memory.
 if [ ! -f /swapfile ]; then
