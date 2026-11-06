@@ -326,7 +326,7 @@ ${helperNote}
 <li>Get the <strong>OpenMessage Reconnect</strong> app (once): <a class="btn" href="${mac}">Mac</a> <a class="btn" href="${win}">Windows</a><br>
 <small>Needs Google Chrome. The first time, your computer may say it's from an unidentified developer. On a Mac: open the download, then right-click "OpenMessage Reconnect", choose Open, then Open. On Windows: More info, then Run anyway.</small></li>
 <li><button id="copy">Copy reconnect code</button> <span id="copied"></span><br><small>The app reads it from your clipboard. It works for 20 minutes.</small></li>
-<li>Open the app. It opens a private Chrome window. Sign in to the Google account your Google Messages uses, until Google Messages opens. The window then closes by itself.</li>
+<li>Open the app. It opens a Chrome window. Sign in to the Google account your Google Messages uses, until Google Messages opens, then close that window. Chrome reopens for a moment by itself.</li>
 <li>Watch this page: when an emoji appears, tap the same one on your phone.</li>
 </ol>
 <div id="live">Waiting for the app…</div>

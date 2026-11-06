@@ -4,10 +4,13 @@
 // app. It:
 //
 //  1. reads the code from the clipboard (omrc1.<base64url {"u": url, "t": token}>);
-//  2. opens a throwaway Incognito Chrome (temporary profile, DevTools on a
-//     random loopback port) at Google sign-in, continuing to Messages Web;
-//  3. waits until the sign-in has produced the cookies pairing needs, then
-//     reads exactly the cookies Chrome would send to messages.google.com/web;
+//  2. opens a throwaway Chrome (temporary profile) at Google sign-in,
+//     continuing to Messages Web, with no DevTools attached: Google refuses
+//     sign-in ("This browser or app may not be secure") in a Chrome started
+//     with a debugging port (Windows, 2026-11-06). The client closes it once
+//     Messages Web shows;
+//  3. reopens that profile with DevTools on a random loopback port and reads
+//     exactly the cookies Chrome would send to messages.google.com/web;
 //  4. posts them to <url>/reconnect/upload with the token, which passes them
 //     to the client's own server to pair (the Reconnect page shows the emoji);
 //  5. shows the result in that window, closes Chrome without signing out,
@@ -45,6 +48,7 @@ const (
 	codePrefix  = "omrc1."
 	target      = "https://messages.google.com/web/"
 	signInLimit = 15 * time.Minute
+	readLimit   = 60 * time.Second
 )
 
 var (
@@ -264,6 +268,15 @@ func resultPage(ok bool, msg string) string {
 	return "data:text/html;charset=utf-8;base64," + base64.StdEncoding.EncodeToString([]byte(doc))
 }
 
+// signInHelp is what the client sees before the sign-in window opens.
+func signInHelp() string {
+	done := "close the Chrome window"
+	if runtime.GOOS == "darwin" {
+		done = "quit that Chrome (Command-Q)"
+	}
+	return "A Chrome window opens next. Sign in to the Google account your Google Messages uses, and wait until Google Messages opens. Then " + done + ". Chrome reopens for a moment by itself to finish."
+}
+
 func run(ctx context.Context) (shown bool, err error) {
 	clip, _ := readClipboard()
 	c, err := parseCode(clip)
@@ -280,9 +293,26 @@ func run(ctx context.Context) (shown bool, err error) {
 	}
 	defer os.RemoveAll(profile)
 
-	cmd := exec.Command(chrome,
-		"--user-data-dir="+profile, "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1",
-		"--incognito", "--no-first-run", "--no-default-browser-check", "--new-window", startURL)
+	base := []string{"--user-data-dir=" + profile, "--no-first-run", "--no-default-browser-check", "--new-window"}
+
+	// Sign-in: an ordinary Chrome, nothing attached.
+	alert("OpenMessage Reconnect", signInHelp())
+	signIn := exec.Command(chrome, append(append([]string{}, base...), startURL)...)
+	if err := signIn.Start(); err != nil {
+		return false, fmt.Errorf("couldn't open Chrome: %v", err)
+	}
+	signedIn := make(chan error, 1)
+	go func() { signedIn <- signIn.Wait() }()
+	select {
+	case <-signedIn:
+	case <-time.After(signInLimit):
+		_ = signIn.Process.Kill()
+		return false, errors.New("the sign-in took too long. Copy a new code from the Reconnect page and try again")
+	}
+
+	// Read the login: the same profile, briefly, with the port on.
+	cmd := exec.Command(chrome, append(append([]string{}, base...),
+		"--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", target)...)
 	if err := cmd.Start(); err != nil {
 		return false, fmt.Errorf("couldn't open Chrome: %v", err)
 	}
@@ -317,18 +347,18 @@ func run(ctx context.Context) (shown bool, err error) {
 		time.Sleep(8 * time.Second)
 	}
 
-	deadline := time.Now().Add(signInLimit)
+	deadline := time.Now().Add(readLimit)
 	var page tab
 	var m map[string]string
 	for {
 		select {
 		case <-exited:
-			return false, errors.New("the Chrome window was closed before the sign-in finished. Open this app again to retry")
+			return false, errors.New("the Chrome window was closed too early. Open this app again to retry")
 		case <-time.After(2 * time.Second):
 		}
 		if time.Now().After(deadline) {
 			closeChrome()
-			return false, errors.New("the sign-in took too long. Copy a new code from the Reconnect page and try again")
+			return false, errors.New("the sign-in didn't finish. Copy a new code from the Reconnect page, open this app again, and sign in until Google Messages shows before closing Chrome")
 		}
 		ts, err := d.tabs(ctx)
 		if err != nil {

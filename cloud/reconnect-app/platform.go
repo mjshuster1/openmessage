@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -59,8 +60,11 @@ func alert(title, msg string) {
 			`on run argv`, "-e", `display dialog (item 2 of argv) with title (item 1 of argv) buttons {"OK"} default button 1`, "-e", `end run`,
 			title, msg)
 	case "windows":
-		ps := `Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show($args[1], $args[0]) | Out-Null`
-		cmd = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps, title, msg)
+		// Words after -Command become part of the script, not $args, so these
+		// travel in the environment.
+		ps := `Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show($env:OM_ALERT_MSG, $env:OM_ALERT_TITLE) | Out-Null`
+		cmd = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
+		cmd.Env = append(os.Environ(), "OM_ALERT_TITLE="+title, "OM_ALERT_MSG="+msg)
 	default:
 		if _, err := exec.LookPath("zenity"); err == nil {
 			cmd = exec.Command("zenity", "--info", "--title", title, "--text", msg)
