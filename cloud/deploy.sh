@@ -8,7 +8,11 @@
 #                   [--timezone America/New_York] [--release latest]
 #                   [--billing-account <id>] [--alerts email|none] [--alert-email <address>] [--restart]
 #                   [--name om-<user>] [--tunnel om-<user>] [--worker om-<user>] [--port auto]
-#                   [--client-owned]
+#                   [--client-owned] [--spam-rules <file.json>]
+#
+# --spam-rules: starting spam rules for the VM (vm/set-spam-rules.sh). Without
+# it, the client starts with the built-in political-text phrases, listed but
+# not blocked, and changes that on their spam page (client-owned setups).
 #
 # --client-owned: everything goes in the client's OWN Google Cloud and
 # Cloudflare accounts (gcloud and Wrangler signed in as the client), so the
@@ -45,7 +49,7 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 USER_NAME= EMAIL= PROJECT= AUTH=google ZONE=us-east1-b NAME= TUNNEL= WORKER= PORT=auto
-TIMEZONE= RELEASE=latest BILLING= RESTART=no LABEL= ALERTS=email ALERT_EMAIL= CLIENT_OWNED=no
+TIMEZONE= RELEASE=latest BILLING= RESTART=no LABEL= ALERTS=email ALERT_EMAIL= CLIENT_OWNED=no SPAM_RULES=
 while [ $# -gt 0 ]; do
   case "$1" in
     --user) USER_NAME=$2; shift 2 ;;
@@ -65,10 +69,12 @@ while [ $# -gt 0 ]; do
     --billing-account) BILLING=$2; shift 2 ;;
     --restart) RESTART=yes; shift ;;
     --client-owned) CLIENT_OWNED=yes; shift ;;
-    -h|--help) sed -n '2,43p' "$0"; exit 0 ;;
+    --spam-rules) SPAM_RULES=$2; shift 2 ;;
+    -h|--help) sed -n '2,47p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
+[ -z "$SPAM_RULES" ] || [ -f "$SPAM_RULES" ] || { echo "--spam-rules: no such file: $SPAM_RULES" >&2; exit 2; }
 [ -n "$USER_NAME" ] && [ -n "$EMAIL" ] && [ -n "$PROJECT" ] || { echo "--user, --email and --project are required (see --help)" >&2; exit 2; }
 [[ "$USER_NAME" =~ ^[a-z0-9-]+$ ]] || { echo "--user: lowercase letters, digits and - only" >&2; exit 2; }
 [[ "$AUTH" == google || "$AUTH" == access ]] || { echo "--auth: google or access" >&2; exit 2; }
@@ -181,6 +187,12 @@ if ! done_step alerts; then
   mark alerts
 fi
 
+if [ -n "$SPAM_RULES" ] && ! done_step spam; then
+  header "Spam rules"
+  "$HERE/vm/set-spam-rules.sh" --rules "$SPAM_RULES" "${VMARGS[@]}"
+  mark spam
+fi
+
 header "7/7 Check"
 URL=$(grep -E '^PUBLIC_URL = "' "$HERE/worker/wrangler.$USER_NAME.toml" | head -1 | cut -d'"' -f2)/mcp
 "$HERE/doctor.sh" "${VMARGS[@]}" --connector "$URL" || echo "(Fix the ✗ items above; the rest of the deploy is done.)"
@@ -209,6 +221,8 @@ Alerts come to $ALERT_EMAIL and $EMAIL (subject starts "$LABEL:"). If Google
 signs it out, the email links to their Reconnect page:
   $(head -1 "$STATE_DIR/reconnect-$USER_NAME.url" 2>/dev/null || echo "(not set up)")
 They need the Reconnect app (on that page) and Google Chrome; no help from you.
+Their spam rules, which they change themselves:
+  $(head -1 "$STATE_DIR/reconnect-$USER_NAME.url" 2>/dev/null || echo "(not set up)")/spam
 Check on it any time: cloud/doctor.sh --all$( [ -s "$STATUS_FILE" ] && echo ", or the status link in $STATUS_FILE")
 EOF
   exit 0

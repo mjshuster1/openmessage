@@ -61,6 +61,21 @@ commands for you to run.
   time: you sign in to Google when asked, then tap the matching emoji on your
   phone.
 
+## Spam
+
+Texts from strangers that match your spam rules are listed for you, and can
+be blocked and reported automatically. Saved contacts and group chats are
+never blocked automatically, and nothing is ever deleted.
+
+- **If it's in your own accounts:** change it yourself on your spam page: add
+  **/spam** to the end of your Reconnect link. There you can add words and
+  numbers, see recent matches, turn automatic blocking on or off, and unblock
+  anyone blocked by mistake. It starts with blocking off, so you can see what
+  it would catch first.
+- **If it's hosted for you:** ask the person who runs your service.
+
+Claude can't change these rules; it stays read-only.
+
 ## Turning it off
 
 Any of these stops it, from least to most permanent:

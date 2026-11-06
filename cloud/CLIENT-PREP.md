@@ -63,5 +63,6 @@ shows any messages:
 
 If Google ever signs your connection out, you'll get an email with a
 **Reconnect link**. You fix it yourself in about 5 minutes on a computer with
-Chrome, phone nearby; no helper needed. For anything else, you let the helper
+Chrome, phone nearby; no helper needed. You change your own spam rules on a
+page of your own, too. For anything else, you let the helper
 back in for that session, and the same hand-back runs at the end.
