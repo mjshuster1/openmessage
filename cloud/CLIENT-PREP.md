@@ -45,17 +45,18 @@ This is the secure connection between your texts and Claude.
 
 - **Your phone**, charged, unlocked and nearby. At one point you'll tap a
   matching emoji on it.
+- **Your own computer** (Mac or Windows) with Google Chrome. The whole setup
+  runs in your browser, in your own accounts. You paste one line we send you,
+  then answer a few questions on screen.
 - **Your passwords** for Google, Cloudflare and Claude, and your phone for
-  any 2-step sign-in codes.
-- About **45 minutes**. You'll sign in to a few things on the computer
-  running the setup; you won't type any commands.
+  any 2-step sign-in codes. You type them yourself; nobody else needs them.
+- About **30 minutes**.
 
 ## What happens at the end
 
-When everything works, the setup removes all of the helper's access to your
-accounts and shows you a short report of what it removed. After that, only
-you can get to your texts. The helper keeps two things, neither of which
-shows any messages:
+The helper never has a login to your accounts, and the setup finishes by
+showing you a short report of who has access: only you. You get an email with
+your links. The helper keeps two things, neither of which shows any messages:
 
 - **Status alerts** by email if your connection stops.
 - **A status link** that shows only "connected or not" and how long ago your
@@ -64,5 +65,4 @@ shows any messages:
 If Google ever signs your connection out, you'll get an email with a
 **Reconnect link**. You fix it yourself in about 5 minutes on a computer with
 Chrome, phone nearby; no helper needed. You change your own spam rules on a
-page of your own, too. For anything else, you let the helper
-back in for that session, and the same hand-back runs at the end.
+page of your own, too. For anything else, you share your screen with the helper.

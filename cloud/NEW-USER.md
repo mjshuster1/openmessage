@@ -25,8 +25,14 @@ OpenMessage on 7007. Alerts are emails to the operator, labelled by client,
 so the client installs nothing. The operator can read every client's
 messages, so the client must know and agree (see the terms).
 
-**Client-owned (for clients whose texts the operator mustn't see).** Same
-steps, but in the client's own Google Cloud project and Cloudflare account,
+**Client-owned from their browser (the easiest way).** The client runs
+everything in their own Google Cloud Shell, so the operator never holds a
+sign-in and the client doesn't need your computer. See
+[`CLIENT-SETUP.md`](CLIENT-SETUP.md). Send them
+[`CLIENT-PREP.md`](CLIENT-PREP.md) first.
+
+**Client-owned from the operator's computer (for clients whose texts the
+operator mustn't see).** Same steps, but in the client's own Google Cloud project and Cloudflare account,
 with gcloud and Wrangler signed in as the client on the operator's computer
 during the call. Send the client [`CLIENT-PREP.md`](CLIENT-PREP.md) first (it
 gets their accounts and card ready). Then:

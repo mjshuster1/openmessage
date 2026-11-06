@@ -267,7 +267,7 @@ function page(env: Env, code: string, st: ReconnectState): string {
   const win = escapeHtml(`${base}/om-reconnect-windows.exe`);
   const now = st.connected
     ? "✓ Connected right now. You only need this if Claude or an alert says it's disconnected."
-    : st.reachable
+    : st.reachable || st.helper
       ? "✗ Not connected to Google Messages. Follow the steps below."
       : "✗ Your server isn't answering. Wait a few minutes and reload; if it stays like this, contact whoever set it up.";
   const helperNote = st.helper ? "" : `<p class="warn">Reconnecting from here isn't switched on for this server yet. Contact whoever set it up.</p>`;

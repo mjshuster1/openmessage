@@ -22,6 +22,11 @@
 # Then it checks that no account still signed in to gcloud here can open the
 # project, and writes the report to ~/.config/openmessage/handback-<user>.txt.
 #
+# --from-browser: setup ran in the client's own Cloud Shell, so no other
+# computer ever held a sign-in. It still removes the SSH key and checks who has
+# access, signs Wrangler out without asking, and leaves their gcloud sign-in
+# alone (it's Cloud Shell's own).
+#
 # Kept on purpose (the report says so): the status-only link (connected or
 # not, newest text's age), the status emails, cloud/worker/wrangler.<user>.toml
 # (resource ids, no secrets) and the fleet entry, which doctor.sh --all then
@@ -35,7 +40,8 @@ set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 STATE_DIR=$HOME/.config/openmessage
-USER_NAME= EMAIL= PROJECT= ZONE=us-east1-b NAME= DRY=no YES=no
+mkdir -p "$STATE_DIR"
+USER_NAME= EMAIL= PROJECT= ZONE=us-east1-b NAME= DRY=no YES=no FROM_BROWSER=no
 while [ $# -gt 0 ]; do
   case "$1" in
     --user) USER_NAME=$2; shift 2 ;;
@@ -45,7 +51,8 @@ while [ $# -gt 0 ]; do
     --name) NAME=$2; shift 2 ;;
     --dry-run) DRY=yes; shift ;;
     --yes) YES=yes; shift ;;
-    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
+    --from-browser) FROM_BROWSER=yes; shift ;;
+    -h|--help) sed -n '2,38p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -153,9 +160,9 @@ echo
 echo "4/5 Cloudflare sign-in"
 if who=$(W whoami --json 2>/dev/null) && [ -n "$who" ]; then
   note "Wrangler is signed in as: $(jq -r '"\(.email) (\([.accounts[]?.name] | join(", ")))"' <<<"$who" 2>/dev/null)"
-  if ask "Is that $USER_NAME's Cloudflare account? Sign Wrangler out of it?"; then
+  if [ "$FROM_BROWSER" = yes ] || ask "Is that $USER_NAME's Cloudflare account? Sign Wrangler out of it?"; then
     run W logout >/dev/null 2>&1 && did "signed this computer out of the client's Cloudflare account" || fail "wrangler logout failed"
-    note "(sign back in to your own Cloudflare later with: cd cloud/worker && npx wrangler login)"
+    [ "$FROM_BROWSER" = yes ] || note "(sign back in to your own Cloudflare later with: cd cloud/worker && npx wrangler login)"
   else
     fail "Wrangler is still signed in to a Cloudflare account; if it's the client's, run: cd cloud/worker && npx wrangler logout"
   fi
@@ -167,7 +174,9 @@ REPORT+=("! Check yourself: Cloudflare dashboard > Manage account > Members list
 # ------------------------------------------------------------ 5. gcloud
 echo
 echo "5/5 Google Cloud sign-in"
-if gcloud auth list --format='value(account)' 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -qx "$EMAIL"; then
+if [ "$FROM_BROWSER" = yes ]; then
+  did "setup ran in your own browser, so no other computer ever had your Google or Cloudflare sign-in"
+elif gcloud auth list --format='value(account)' 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -qx "$EMAIL"; then
   run gcloud auth revoke "$EMAIL" --quiet >/dev/null 2>&1 && did "signed this computer out of $EMAIL in gcloud" || fail "couldn't revoke gcloud's sign-in as $EMAIL"
 else
   did "gcloud here isn't signed in as $EMAIL"
@@ -182,6 +191,8 @@ echo
 echo "Check: can any account still signed in here open $PROJECT?"
 if [ "$DRY" = yes ]; then
   note "(dry run: skipped)"
+elif [ "$FROM_BROWSER" = yes ]; then
+  note "(this is your own Cloud Shell: skipped)"
 else
   still=
   for acct in $(gcloud auth list --format='value(account)' 2>/dev/null); do

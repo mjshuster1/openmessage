@@ -8,7 +8,12 @@
 #                   [--timezone America/New_York] [--release latest]
 #                   [--billing-account <id>] [--alerts email|none] [--alert-email <address>] [--restart]
 #                   [--name om-<user>] [--tunnel om-<user>] [--worker om-<user>] [--port auto]
-#                   [--client-owned] [--spam-rules <file.json>]
+#                   [--client-owned [--from-browser]] [--spam-rules <file.json>]
+#
+# --from-browser: this is running in the client's own Cloud Shell (setup.sh
+# starts it this way), so the operator never holds a sign-in. Pairing goes
+# through the Reconnect page and app instead of a local Chrome, the client's
+# links are emailed, and the hand-back only tidies up.
 #
 # --spam-rules: starting spam rules for the VM (vm/set-spam-rules.sh). Without
 # it, the client starts with the built-in political-text phrases, listed but
@@ -49,7 +54,7 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 USER_NAME= EMAIL= PROJECT= AUTH=google ZONE=us-east1-b NAME= TUNNEL= WORKER= PORT=auto
-TIMEZONE= RELEASE=latest BILLING= RESTART=no LABEL= ALERTS=email ALERT_EMAIL= CLIENT_OWNED=no SPAM_RULES=
+TIMEZONE= RELEASE=latest BILLING= RESTART=no LABEL= ALERTS=email ALERT_EMAIL= CLIENT_OWNED=no SPAM_RULES= FROM_BROWSER=no
 while [ $# -gt 0 ]; do
   case "$1" in
     --user) USER_NAME=$2; shift 2 ;;
@@ -70,7 +75,8 @@ while [ $# -gt 0 ]; do
     --restart) RESTART=yes; shift ;;
     --client-owned) CLIENT_OWNED=yes; shift ;;
     --spam-rules) SPAM_RULES=$2; shift 2 ;;
-    -h|--help) sed -n '2,47p' "$0"; exit 0 ;;
+    --from-browser) FROM_BROWSER=yes; shift ;;
+    -h|--help) sed -n '2,52p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -83,6 +89,7 @@ done
 if [ "$CLIENT_OWNED" = yes ] && [ "$ALERTS" = email ] && [ -z "$ALERT_EMAIL" ]; then
   echo "--client-owned needs --alert-email <your address> (gcloud is signed in as the client)" >&2; exit 2
 fi
+[ "$FROM_BROWSER" = no ] || [ "$CLIENT_OWNED" = yes ] || { echo "--from-browser needs --client-owned" >&2; exit 2; }
 NAME=${NAME:-om-$USER_NAME} TUNNEL=${TUNNEL:-om-$USER_NAME} WORKER=${WORKER:-om-$USER_NAME}
 LABEL=${LABEL:-$USER_NAME}
 [[ "$LABEL" =~ ^[A-Za-z0-9\ _.-]{1,30}$ ]] || { echo "--label: up to 30 letters, digits, spaces, . _ -" >&2; exit 2; }
@@ -121,7 +128,9 @@ if [ -s "$DONE" ]; then echo "Already done: $(paste -sd, "$DONE"). (--restart to
 header "1/7 This computer"
 "$HERE/doctor.sh" --pre --project "$PROJECT" || {
   echo "Fix the ✗ items above, then run the same command again." >&2; exit 1; }
-if [ "$CLIENT_OWNED" = yes ]; then
+if [ "$FROM_BROWSER" = yes ]; then
+  echo "These are your own accounts, in your own browser."
+elif [ "$CLIENT_OWNED" = yes ]; then
   echo "Client-owned: gcloud and Wrangler (shown above) must both be signed in as $USER_NAME, not you."
   done_step preflight || { pause "Are both $USER_NAME's own accounts?"; mark preflight; }
 else
@@ -155,17 +164,40 @@ fi
 
 if ! done_step connector; then
   header "4/7 claude.ai connector"
-  (cd "$HERE/worker" && ./setup-connector.sh --user "$USER_NAME" --email "$EMAIL" --tunnel "$TUNNEL" --worker "$WORKER" --port "$PORT" --auth "$AUTH" \
-     $( [ "$CLIENT_OWNED" = yes ] && echo --reconnect ))
+  (cd "$HERE/worker" && ./setup-connector.sh --user "$USER_NAME" --email "$EMAIL" --tunnel "$TUNNEL" --worker "$WORKER" --port "$PORT" --auth "$AUTH" --project "$PROJECT" \
+     $( [ "$CLIENT_OWNED" = yes ] && echo --reconnect ) $( [ "$FROM_BROWSER" = yes ] && echo --account-confirmed ))
   mark connector
 fi
 
 if ! done_step pair; then
   header "5/7 Pair Google Messages"
-  echo "$USER_NAME needs their Android phone in hand, and you need to sign in to"
-  echo "$EMAIL in the Chrome window that opens (or have them do it)."
-  pause "Ready?"
-  "$HERE/vm/reconnect.sh" "${VMARGS[@]}"
+  if [ "$FROM_BROWSER" = yes ]; then
+    # Cloud Shell has no Chrome, so this is the same path as any later reconnect.
+    RC_URL=$(head -1 "$STATE_DIR/reconnect-$USER_NAME.url" 2>/dev/null || true)
+    [ -n "$RC_URL" ] || { echo "The Reconnect page isn't set up; run this again." >&2; exit 1; }
+    vm_status() { gcloud compute ssh --quiet "$NAME" --zone "$ZONE" --project "$PROJECT" -- "$1" 2>/dev/null; }
+    vm_status 'sudo systemctl start openmessage' || true
+    cat <<EOF
+With your phone nearby, open this in a new tab on this computer, and follow
+the steps on the page (keep this tab open):
+
+  $RC_URL
+
+It's finished when that page says Connected. Waiting here...
+EOF
+    connected=no
+    for _ in $(seq 1 120); do
+      sleep 15
+      if [ "$(vm_status "curl -s -m 5 127.0.0.1:7007/api/status | jq -r .google.connected" | tail -1)" = true ]; then connected=yes; break; fi
+    done
+    [ "$connected" = yes ] || { echo "It hasn't connected after 30 minutes. Paste the same line again to carry on waiting (the page allows 3 tries a day)." >&2; exit 1; }
+    echo "Connected."
+  else
+    echo "$USER_NAME needs their Android phone in hand, and you need to sign in to"
+    echo "$EMAIL in the Chrome window that opens (or have them do it)."
+    pause "Ready?"
+    "$HERE/vm/reconnect.sh" "${VMARGS[@]}"
+  fi
   mark pair
 fi
 
@@ -175,7 +207,12 @@ if ! done_step alerts; then
     if [ "$CLIENT_OWNED" = yes ]; then
       # Both of you get them; "needs reconnecting" points at the client's Reconnect page.
       RC_URL=$(head -1 "$STATE_DIR/reconnect-$USER_NAME.url" 2>/dev/null || true)
-      "$HERE/vm/set-email-alerts.sh" --project "$PROJECT" --email "$ALERT_EMAIL" --email "$EMAIL"
+      # With no separate helper the two are the same address: one email, not two.
+      if [ "$(tr '[:upper:]' '[:lower:]' <<<"$ALERT_EMAIL")" = "$(tr '[:upper:]' '[:lower:]' <<<"$EMAIL")" ]; then
+        "$HERE/vm/set-email-alerts.sh" --project "$PROJECT" --email "$EMAIL"
+      else
+        "$HERE/vm/set-email-alerts.sh" --project "$PROJECT" --email "$ALERT_EMAIL" --email "$EMAIL"
+      fi
       "$HERE/vm/set-alerts.sh" "${VMARGS[@]}" --email --label "$LABEL" ${RC_URL:+--reconnect-url "$RC_URL"}
     else
       "$HERE/vm/set-email-alerts.sh" --project "$PROJECT" ${ALERT_EMAIL:+--email "$ALERT_EMAIL"}
@@ -202,7 +239,17 @@ rm -f "$PORT_FILE"   # the VPC service holds the port now
 STATUS_FILE=$HOME/.config/openmessage/status-$USER_NAME.url
 
 if [ "$CLIENT_OWNED" = yes ]; then
-  cat <<EOF
+  if [ "$FROM_BROWSER" = yes ]; then
+    cat <<EOF
+
+Last step: connect Claude. In a new tab, go to claude.ai, then Settings,
+Connectors, Add custom connector, and paste:
+  $URL
+Sign in as $EMAIL, then ask Claude: "what are my last three texts?"
+EOF
+    pause "Once that works, this finishes up."
+  else
+    cat <<EOF
 
 Next: $USER_NAME adds the connector in claude.ai (in a browser, signed in to
 their Claude account):
@@ -210,10 +257,33 @@ their Claude account):
   then sign in as $EMAIL$( [ "$AUTH" = access ] && echo " (Cloudflare emails a one-time PIN)" ).
 Check together that "what are my last three texts?" works.
 EOF
-  pause "Once that works, hand the accounts back."
+    pause "Once that works, hand the accounts back."
+  fi
+  RC_LINK=$(head -1 "$STATE_DIR/reconnect-$USER_NAME.url" 2>/dev/null || true)
+  STATUS_LINK=$(head -1 "$STATUS_FILE" 2>/dev/null || true)
+  if [ "$FROM_BROWSER" = yes ]; then
+    # Status only: these links show no messages, and each page needs a sign-in
+    # except the status link. It's how the helper gets the status link at all.
+    msg="Claude connector: $URL | Reconnect page: $RC_LINK | Spam rules: $RC_LINK/spam | Status link for your helper: $STATUS_LINK"
+    if [ "$ALERTS" = email ] && gcloud compute ssh --quiet "$NAME" --zone "$ZONE" --project "$PROJECT" -- \
+         "sudo om-notify $(printf '%q' "$LABEL: your links for texts in Claude") $(printf '%q' "$msg") NOTICE" 2>/dev/null; then
+      echo "Your links are on their way by email (within a few minutes)."
+    else
+      echo "Copy these and keep them:"; tr '|' '\n' <<<"$msg"
+    fi
+  fi
   header "8/8 Hand back"
   "$HERE/handback.sh" --user "$USER_NAME" --email "$EMAIL" --project "$PROJECT" --zone "$ZONE" --name "$NAME" \
+    $( [ "$FROM_BROWSER" = yes ] && echo --from-browser ) \
     || echo "(Fix the ✗ items above, then run cloud/handback.sh again with the same options.)"
+  if [ "$FROM_BROWSER" = yes ]; then
+    cat <<EOF
+
+All done. You can close this tab. Your guide is at
+https://github.com/mjshuster1/openmessage/blob/main/cloud/USER-GUIDE.md
+EOF
+    exit 0
+  fi
   cat <<EOF
 
 Done. Give $USER_NAME their guide (cloud/USER-GUIDE.md) and the report above.

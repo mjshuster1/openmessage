@@ -7,6 +7,9 @@
 #   cloud/doctor.sh --pre [--project <id>]   before a deploy: tools and logins only
 #   cloud/doctor.sh --all                    one line per deployment in the fleet file
 #   cloud/doctor.sh --save <label> [same options]   add/replace this deployment in the fleet file
+#   cloud/doctor.sh --add-client <label> --status-url <link> [--connector <url>] [--name] [--zone] [--project]
+#       add a setup done in the client's own browser (setup.sh): this computer
+#       only ever has the status link from their setup-finished email
 #
 # Checks: local tools and logins; the VM (running, release, OpenMessage,
 # Google Messages, newest text, alerts, cloudflared, disk); the connector
@@ -30,6 +33,8 @@ USER_NAME=
 CONNECTOR=
 MODE=full
 SAVE=
+ADD_CLIENT=
+STATUS_URL=
 while [ $# -gt 0 ]; do
   case "$1" in
     --name) NAME=$2; shift 2 ;;
@@ -40,10 +45,26 @@ while [ $# -gt 0 ]; do
     --pre) MODE=pre; shift ;;
     --all) MODE=all; shift ;;
     --save) SAVE=$2; shift 2 ;;
-    -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
+    --add-client) ADD_CLIENT=$2; shift 2 ;;
+    --status-url) STATUS_URL=$2; shift 2 ;;
+    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
+
+if [ -n "$ADD_CLIENT" ]; then
+  [[ "$ADD_CLIENT" =~ ^[a-z0-9-]+$ ]] || { echo "--add-client: lowercase letters, digits and - only" >&2; exit 2; }
+  [[ "$STATUS_URL" =~ ^https://[A-Za-z0-9.-]+/status\?key=[A-Za-z0-9]+$ ]] || { echo "--status-url: https://<connector>/status?key=..." >&2; exit 2; }
+  dir=$(dirname "$FLEET"); mkdir -p "$dir"; touch "$FLEET" "$dir/handed-back"
+  [ -n "$CONNECTOR" ] || CONNECTOR=${STATUS_URL%%/status*}/mcp
+  [ "$NAME" != om-test ] || NAME=om-$ADD_CLIENT
+  tmp=$(mktemp); awk -F'\t' -v l="$ADD_CLIENT" '$1 != l' "$FLEET" > "$tmp"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$ADD_CLIENT" "$NAME" "$ZONE" "${PROJECT:-unknown}" "$CONNECTOR" >> "$tmp"; mv "$tmp" "$FLEET"
+  grep -qx "$ADD_CLIENT" "$dir/handed-back" || echo "$ADD_CLIENT" >> "$dir/handed-back"
+  (umask 077; printf '%s\n' "$STATUS_URL" > "$dir/status-$ADD_CLIENT.url")
+  echo "Added $ADD_CLIENT; doctor.sh --all checks it through its status link."
+  exit 0
+fi
 
 if [ -t 1 ]; then OK=$'\e[32m✓\e[0m'; WARN=$'\e[33m!\e[0m'; BAD=$'\e[31m✗\e[0m'; else OK='✓'; WARN='!'; BAD='✗'; fi
 FAILS=0

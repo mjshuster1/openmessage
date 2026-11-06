@@ -7,6 +7,7 @@
 #                                   [--auth google|access] [--access-aud <AUD tag>]
 #                                   [--tunnel om-vm] [--worker openmessage-connector] [--port 7007]
 #                                   [--reconnect [--pair-port 7011]]
+#                                   [--project <id>] [--account-confirmed]
 #
 # Before: `npx wrangler login` as the user (check `npx wrangler whoami`), the
 # tunnel created and Healthy (create-vm.sh installs it), `npm ci` in this
@@ -30,6 +31,10 @@
 # so). deploy.sh --client-owned passes it; one VPC service per host:port per
 # account means only one client per Cloudflare account can use port 7011.
 #
+# --project: the Google Cloud project, for direct links to the sign-in step.
+# --account-confirmed: don't ask whether this is the right Cloudflare account
+# (setup.sh runs in the client's own browser, so it is).
+#
 # Writes wrangler.<user>.toml here (git ignores it). Prints the connector URL
 # to add in claude.ai.
 set -euo pipefail
@@ -43,6 +48,8 @@ AUTH=google
 ACCESS_AUD=
 RECONNECT=no
 PAIR_PORT=7011
+PROJECT=
+ACCOUNT_CONFIRMED=no
 while [ $# -gt 0 ]; do
   case "$1" in
     --user) USER_NAME=$2; shift 2 ;;
@@ -54,7 +61,9 @@ while [ $# -gt 0 ]; do
     --access-aud) ACCESS_AUD=$2; shift 2 ;;
     --reconnect) RECONNECT=yes; shift ;;
     --pair-port) PAIR_PORT=$2; shift 2 ;;
-    -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
+    --project) PROJECT=$2; shift 2 ;;
+    --account-confirmed) ACCOUNT_CONFIRMED=yes; shift ;;
+    -h|--help) sed -n '2,41p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -76,7 +85,7 @@ who=$(W whoami --json 2>/dev/null) || { echo "Wrangler isn't signed in: run npx 
 acct_count=$(json 'd=>d.accounts.length' <<<"$who")
 [ "$acct_count" = 1 ] || { echo "This login sees $acct_count Cloudflare accounts; set CLOUDFLARE_ACCOUNT_ID to the user's and re-run." >&2; [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] || exit 1; }
 echo "Cloudflare account: $(json 'd=>d.accounts[0].name' <<<"$who") ($(json 'd=>d.email' <<<"$who"))"
-read -rp "Is this the account that should host $USER_NAME's connector? [y/N] " yn; [[ "$yn" == [yY]* ]] || exit 1
+[ "$ACCOUNT_CONFIRMED" = yes ] || { read -rp "Is this the account that should host $USER_NAME's connector? [y/N] " yn; [[ "$yn" == [yY]* ]] || exit 1; }
 
 echo "1/6 Tunnel '$TUNNEL'  (sign-in: $AUTH)"
 tline=$(W tunnel list 2>/dev/null | grep -E "│ *$UUID *│ *$TUNNEL *│" || true)
@@ -248,18 +257,30 @@ else
   yn=y
 fi
 if [[ "$yn" == [yY]* ]]; then
+  GC=https://console.cloud.google.com/auth
+  Q=${PROJECT:+?project=$PROJECT}
   cat <<EOF
 
-   One manual step: a Google OAuth client for sign-in. In the user's Google Cloud
-   project (console.cloud.google.com, the same project as the VM is fine):
-     a. APIs & Services > OAuth consent screen: set it up (External; app name e.g.
-        "OpenMessage connector"; add $EMAIL as a test user).
-     b. APIs & Services > Credentials > Create credentials > OAuth client ID:
-        type "Web application", authorized redirect URI exactly:
-          $PUBLIC_URL/callback$( [ "$RECONNECT" = yes ] && printf '\n        and a second one:\n          %s/reconnect/callback' "$PUBLIC_URL")
-     c. Copy the client ID and secret and paste them here.
+   One step by hand: Google sign-in for your connection (Google has no way to
+   do this automatically). Open each link in a new tab; sign in as $EMAIL.
+
+     a. Name it: $GC/overview$Q
+        Click Get started. App name: OpenMessage. Support and contact email:
+        $EMAIL. Audience: External. Agree and Create.
+        (Older screen: APIs & Services > OAuth consent screen.)
+     b. Allow yourself: $GC/audience$Q
+        Under Test users, Add users: $EMAIL. Save.
+     c. Create the client: $GC/clients/create$Q
+        Type: Web application. Under Authorized redirect URIs, Add URI:
+          $PUBLIC_URL/callback$( [ "$RECONNECT" = yes ] && printf '\n        Add URI again:\n          %s/reconnect/callback' "$PUBLIC_URL")
+        Create. Leave that box open: it shows the client ID and secret.
+     d. Paste them here (the secret won't show as you paste it).
 EOF
-  read -rp "   Client ID: " CID
+  while :; do
+    read -rp "   Client ID: " CID
+    [[ "$CID" == *.apps.googleusercontent.com ]] && break
+    echo "   That isn't a client ID: it ends in .apps.googleusercontent.com."
+  done
   read -rsp "   Client secret (hidden): " CSECRET; echo
   [ -n "$CID" ] && [ -n "$CSECRET" ] || { echo "Both are needed; re-run to finish (everything else is kept)." >&2; exit 1; }
   printf '%s' "$CID" | W secret put GOOGLE_CLIENT_ID -c "$CFG" >/dev/null 2>&1

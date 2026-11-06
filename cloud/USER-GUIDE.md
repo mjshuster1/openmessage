@@ -98,8 +98,8 @@ Any of these stops it, from least to most permanent:
   service): they have admin access to it, so they could read your texts; the
   terms say what they may do with that access.
 - **If it's in your own accounts** (your own Google Cloud and Cloudflare):
-  setup ended by removing the helper's access and showing you a report of
-  what it removed. They keep only status alerts and a status-only link, which
+  setup ended by showing you a report of who has access. Whoever helped you
+  has no login to your accounts. They keep only status alerts and a status-only link, which
   show whether it's connected and how long ago the newest text arrived, never
   messages. The software still updates itself from their published releases.
   To get help later, you let them back in for that session.
