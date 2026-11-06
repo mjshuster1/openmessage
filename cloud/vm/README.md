@@ -223,3 +223,14 @@ Also watch mjshuster1@gmail.com for a Google security alert.
   session no longer works, re-pair it with `openmessage pair --google-chrome`
   (emoji again).
 - **Tear down** when decided: delete the VM and the `om-vm` tunnel.
+
+## Restoring from a backup
+
+`deploy.sh` turns on nightly disk snapshots, kept 7 days (`set-backups.sh`). If
+a disk is damaged, in the project's owner's Google Cloud (Compute Engine >
+Snapshots), create a disk from the newest snapshot and a new VM from that disk
+with the same name and metadata, after deleting the old VM. The tunnel token is
+on the disk, so the connector finds it again. The Google sign-in on it may have
+expired; if alerts say so, use the Reconnect page. Texts from after the
+snapshot come back as the phone syncs them, which isn't guaranteed for older
+ones. Don't run the old and new VMs at once: they'd share one Google sign-in.

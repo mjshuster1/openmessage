@@ -15,7 +15,7 @@ itself about 30 minutes shorter. You don't need to install anything.
 ## 2. Make a Google Cloud account (5 minutes)
 
 This is the small computer that keeps your texts. It costs about
-**$3.65 a month**, billed to your card.
+**$4 a month**, billed to your card.
 
 1. Go to **console.cloud.google.com** and sign in with your Google account
    (the one from step 1 is easiest).

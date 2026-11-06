@@ -44,7 +44,7 @@
 #   4. * claude.ai connector Worker                        (worker/setup-connector.sh)
 #        google: a Google OAuth client; access: turn on Cloudflare Access
 #   5. * pair Google Messages, phone in hand               (vm/reconnect.sh)
-#   6. email alerts to the operator                        (vm/set-email-alerts.sh, set-alerts.sh)
+#   6. nightly disk backups, email alerts to the operator  (vm/set-backups.sh, set-email-alerts.sh, set-alerts.sh)
 #   7. check everything, add to the fleet file             (doctor.sh)
 # Then it prints what to hand over. Before: `gcloud auth login` as an account
 # that may create projects and use the billing account, and `cd cloud/worker &&
@@ -201,21 +201,28 @@ EOF
   mark pair
 fi
 
+if ! done_step backups; then
+  header "Nightly backups"
+  "$HERE/vm/set-backups.sh" "${VMARGS[@]}"
+  mark backups
+fi
+
 if ! done_step alerts; then
   header "6/7 Alerts"
   if [ "$ALERTS" = email ]; then
+    SL=$(head -1 "$STATE_DIR/status-$USER_NAME.url" 2>/dev/null || true)
     if [ "$CLIENT_OWNED" = yes ]; then
       # Both of you get them; "needs reconnecting" points at the client's Reconnect page.
       RC_URL=$(head -1 "$STATE_DIR/reconnect-$USER_NAME.url" 2>/dev/null || true)
       # With no separate helper the two are the same address: one email, not two.
       if [ "$(tr '[:upper:]' '[:lower:]' <<<"$ALERT_EMAIL")" = "$(tr '[:upper:]' '[:lower:]' <<<"$EMAIL")" ]; then
-        "$HERE/vm/set-email-alerts.sh" --project "$PROJECT" --email "$EMAIL"
+        "$HERE/vm/set-email-alerts.sh" --project "$PROJECT" --email "$EMAIL" ${SL:+--status-url "$SL"} --label "$LABEL"
       else
-        "$HERE/vm/set-email-alerts.sh" --project "$PROJECT" --email "$ALERT_EMAIL" --email "$EMAIL"
+        "$HERE/vm/set-email-alerts.sh" --project "$PROJECT" --email "$ALERT_EMAIL" --email "$EMAIL" ${SL:+--status-url "$SL"} --label "$LABEL"
       fi
       "$HERE/vm/set-alerts.sh" "${VMARGS[@]}" --email --label "$LABEL" ${RC_URL:+--reconnect-url "$RC_URL"}
     else
-      "$HERE/vm/set-email-alerts.sh" --project "$PROJECT" ${ALERT_EMAIL:+--email "$ALERT_EMAIL"}
+      "$HERE/vm/set-email-alerts.sh" --project "$PROJECT" ${ALERT_EMAIL:+--email "$ALERT_EMAIL"} ${SL:+--status-url "$SL"} --label "$LABEL"
       "$HERE/vm/set-alerts.sh" "${VMARGS[@]}" --email --label "$LABEL"
     fi
   else

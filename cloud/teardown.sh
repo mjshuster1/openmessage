@@ -3,7 +3,7 @@
 # it will delete and asks you to type the user name before deleting anything.
 #
 #   cloud/teardown.sh --user <short-name> [--project <id>] [--zone us-east1-b] [--name om-<user>]
-#                     [--tunnel <name>] [--delete-project] [--dry-run] [--yes]
+#                     [--tunnel <name>] [--worker <name>] [--delete-project] [--dry-run] [--yes]
 #
 # Deletes, where it finds them:
 #   - the VM (its disk and everything on it: messages, pairing, alerts)
@@ -21,12 +21,14 @@
 # Cloudflare account. It then lists what to remove by hand (the claude.ai
 # connector, a Cloudflare Access app).
 # --tunnel deletes that tunnel even without a Worker config (same in-use check).
+# --worker finds a Worker by name when wrangler.<user>.toml is gone (its VPC
+# services <worker>-origin and <worker>-pair, and KV namespace <worker>-oauth).
 # It keeps a Worker, VPC service or KV namespace that another wrangler*.toml in
 # cloud/worker still uses (it can only see those configs).
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-USER_NAME= PROJECT= ZONE= NAME= TUNNEL= DELETE_PROJECT=no DRY=no YES=no
+USER_NAME= PROJECT= ZONE= NAME= TUNNEL= WORKER_ARG= DELETE_PROJECT=no DRY=no YES=no
 while [ $# -gt 0 ]; do
   case "$1" in
     --user) USER_NAME=$2; shift 2 ;;
@@ -34,10 +36,11 @@ while [ $# -gt 0 ]; do
     --zone) ZONE=$2; shift 2 ;;
     --name) NAME=$2; shift 2 ;;
     --tunnel) TUNNEL=$2; shift 2 ;;
+    --worker) WORKER_ARG=$2; shift 2 ;;
     --delete-project) DELETE_PROJECT=yes; shift ;;
     --dry-run) DRY=yes; shift ;;
     --yes) YES=yes; shift ;;
-    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -68,6 +71,13 @@ if [ -f "$CFG" ]; then
   VPC_ID=$(grep -oE "service_id = \"$UUID\"" "$CFG" | grep -oE "$UUID" | head -1 || true)
   PAIR_ID=$(grep -A1 '^binding = "PAIR"' "$CFG" | grep -oE "$UUID" | head -1 || true)
   KV_ID=$(grep -oE '^id = "[0-9a-f]{32}"' "$CFG" | grep -oE '[0-9a-f]{32}' | head -1 || true)
+elif [ -n "$WORKER_ARG" ]; then
+  WORKER=$WORKER_ARG
+  who=$(W whoami --json 2>/dev/null) || { echo "Wrangler isn't signed in." >&2; exit 1; }
+  named=$(W vpc service list 2>/dev/null || true)
+  VPC_ID=$(grep -E "│ *$UUID *│ *$WORKER-origin *│" <<<"$named" | grep -oE "$UUID" | head -1 || true)
+  PAIR_ID=$(grep -E "│ *$UUID *│ *$WORKER-pair *│" <<<"$named" | grep -oE "$UUID" | head -1 || true)
+  KV_ID=$(W kv namespace list 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log((JSON.parse(s).find(n=>n.title==='$WORKER-oauth')||{}).id||'')}catch{}})" || true)
 fi
 
 # --- what exists -----------------------------------------------------------
@@ -183,6 +193,8 @@ run() { local what=$1; shift; if out=$("$@" 2>&1); then echo "  ✓ $what"; else
 echo
 if [ "$VM" = yes ]; then
   run "VM $NAME deleted" gcloud compute instances delete "$NAME" --zone "$ZONE" --project "$PROJECT" --quiet
+  # Backups already taken expire on their 7-day schedule, or go with the project.
+  [ "$PROJ" = yes ] || gcloud compute resource-policies delete om-nightly --region "${ZONE%-*}" --project "$PROJECT" --quiet >/dev/null 2>&1 || true
 fi
 if [ "$CF" = yes ]; then
   [ "$WORKER_EXISTS" = no ] || run "Worker $WORKER deleted" bash -c "yes | (cd '$WDIR' && npx --no-install wrangler delete --name '$WORKER' --force)"
@@ -222,6 +234,7 @@ fi
 echo
 echo "By hand:"
 echo "  - $USER_NAME removes the connector: claude.ai > Settings > Connectors > ... > Remove"
+echo "  - $USER_NAME removes the paired device: Google Messages > Device pairing"
 if [ "$AUTH" = access ]; then
   echo "  - Cloudflare Zero Trust > Access controls > Applications: delete the $WORKER app"
 fi

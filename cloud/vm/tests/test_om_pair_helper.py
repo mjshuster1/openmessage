@@ -268,5 +268,81 @@ class SpamTests(unittest.TestCase):
         self.assertFalse(os.path.exists(self.rules))
 
 
+class ServerTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        p = lambda n: os.path.join(self.dir, n)
+        self.bin, self.stamp, self.skip, self.prev = p("openmessage"), p("stamp"), p("skip"), p("prev")
+        os.mkdir(self.prev)
+        with open(self.bin, "w") as f:
+            f.write("new")
+        with open(self.stamp, "w") as f:
+            f.write("repo@v1-vm8\n")
+        self.notify_log = p("notified")
+        notify = p("notify")
+        with open(notify, "w") as f:
+            f.write(f'#!/bin/sh\necho "$1|$2|$3" >> {self.notify_log}\n')
+        os.chmod(notify, 0o755)
+        self.mod, self.srv, self.calls = load_helper(
+            OM_PAIR_CMD=fake_pair("sleep 1\n"), OM_BIN=self.bin, OM_STAMP=self.stamp, OM_SKIP=self.skip,
+            OM_PREV_DIR=self.prev, OM_NOTIFY=notify, OM_SERVER_MAX_PER_DAY="2")
+
+    def previous(self):
+        with open(os.path.join(self.prev, "openmessage"), "w") as f:
+            f.write("old")
+        with open(os.path.join(self.prev, "release"), "w") as f:
+            f.write("repo@v1-vm7\n")
+
+    def settled(self):
+        for _ in range(100):
+            if spam_req(self.srv, "GET", "/server")[1]["message"] not in ("", "Working on it…"):
+                return
+            time.sleep(0.02)
+        self.fail("never finished")
+
+    def test_info(self):
+        code, d = spam_req(self.srv, "GET", "/server")
+        self.assertEqual((code, d["version"], d["previous_version"], d["actions_left_today"]), (200, "v1-vm8", "", 2))
+        self.previous()
+        self.assertEqual(spam_req(self.srv, "GET", "/server")[1]["previous_version"], "v1-vm7")
+
+    def test_restart(self):
+        self.assertEqual(spam_req(self.srv, "POST", "/server", {"action": "restart"})[0], 202)
+        self.settled()
+        self.assertIn(("restart", "openmessage"), self.calls)
+        self.assertEqual(open(self.bin).read(), "new")
+
+    def test_go_back(self):
+        self.previous()
+        self.assertEqual(spam_req(self.srv, "POST", "/server", {"action": "go_back"})[0], 202)
+        self.settled()
+        self.assertEqual(open(self.bin).read(), "old")
+        self.assertEqual(stat.S_IMODE(os.stat(self.bin).st_mode), 0o755)
+        self.assertEqual(open(self.stamp).read().strip(), "repo@v1-vm7")
+        self.assertEqual(open(self.skip).read().strip(), "v1-vm8")  # won't re-take it
+        self.assertIn(("restart", "openmessage"), self.calls)
+        self.assertIn("v1-vm8", open(self.notify_log).read())
+
+    def test_go_back_with_nothing_to_go_back_to(self):
+        self.assertEqual(spam_req(self.srv, "POST", "/server", {"action": "go_back"})[0], 409)
+        self.assertEqual(open(self.bin).read(), "new")
+
+    def test_refusals(self):
+        self.assertEqual(spam_req(self.srv, "POST", "/server", {"action": "reboot"})[0], 400)
+        self.assertEqual(spam_req(self.srv, "GET", "/server", host="evil.example")[0], 403)
+        self.assertEqual(spam_req(self.srv, "POST", "/server", {"action": "restart"}, host="evil.example")[0], 403)
+        self.assertEqual(self.calls, [])
+
+    def test_daily_limit(self):
+        for _ in range(2):
+            self.assertEqual(spam_req(self.srv, "POST", "/server", {"action": "restart"})[0], 202)
+        self.assertEqual(spam_req(self.srv, "POST", "/server", {"action": "restart"})[0], 429)
+
+    def test_not_during_a_reconnect(self):
+        self.assertEqual(req(self.srv, "POST", {"cookies": GOOD})[0], 202)
+        self.assertEqual(spam_req(self.srv, "POST", "/server", {"action": "restart"})[0], 409)
+        wait_state(self.srv, {"failed", "connected"})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

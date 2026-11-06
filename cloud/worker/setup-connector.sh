@@ -7,7 +7,7 @@
 #                                   [--auth google|access] [--access-aud <AUD tag>]
 #                                   [--tunnel om-vm] [--worker openmessage-connector] [--port 7007]
 #                                   [--reconnect [--pair-port 7011]]
-#                                   [--project <id>] [--account-confirmed]
+#                                   [--project <id>] [--account-confirmed] [--update --public-url <url>]
 #
 # Before: `npx wrangler login` as the user (check `npx wrangler whoami`), the
 # tunnel created and Healthy (create-vm.sh installs it), `npm ci` in this
@@ -34,6 +34,9 @@
 # --project: the Google Cloud project, for direct links to the sign-in step.
 # --account-confirmed: don't ask whether this is the right Cloudflare account
 # (setup.sh runs in the client's own browser, so it is).
+# --update: redeploy an existing connector with this code, keeping its address,
+# sign-in, status link and everything else. --public-url is its address, needed
+# when wrangler.<user>.toml is gone; without it a fresh address would be sought.
 #
 # Writes wrangler.<user>.toml here (git ignores it). Prints the connector URL
 # to add in claude.ai.
@@ -50,6 +53,8 @@ RECONNECT=no
 PAIR_PORT=7011
 PROJECT=
 ACCOUNT_CONFIRMED=no
+UPDATE=no
+GIVEN_URL=
 while [ $# -gt 0 ]; do
   case "$1" in
     --user) USER_NAME=$2; shift 2 ;;
@@ -63,7 +68,9 @@ while [ $# -gt 0 ]; do
     --pair-port) PAIR_PORT=$2; shift 2 ;;
     --project) PROJECT=$2; shift 2 ;;
     --account-confirmed) ACCOUNT_CONFIRMED=yes; shift ;;
-    -h|--help) sed -n '2,41p' "$0"; exit 0 ;;
+    --update) UPDATE=yes; shift ;;
+    --public-url) GIVEN_URL=$2; shift 2 ;;
+    -h|--help) sed -n '2,44p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -164,6 +171,8 @@ write_cfg() { # $1 = PUBLIC_URL; also uses AUTH, TEAM, ACCESS_AUD
 
 echo "4/6 First deploy (learns the workers.dev address)"
 PUBLIC_URL=$(grep -E '^PUBLIC_URL = "https://[a-z0-9.-]+\.workers\.dev"' "$CFG" 2>/dev/null | grep -oE 'https://[a-z0-9.-]+\.workers\.dev' || true)
+PUBLIC_URL=${PUBLIC_URL:-$GIVEN_URL}
+[ "$UPDATE" = no ] || [ -n "$PUBLIC_URL" ] || { echo "--update needs --public-url when there's no wrangler.$USER_NAME.toml" >&2; exit 2; }
 if [ -z "$PUBLIC_URL" ]; then
   # The Worker answers only on PUBLIC_URL's host, so this placeholder deploy serves nothing.
   write_cfg "https://placeholder.invalid"
@@ -232,12 +241,15 @@ fi
 
 echo "5/6 Secrets"
 existing=$(W secret list -c "$CFG" 2>/dev/null || true)
-printf '%s' "$EMAIL" | W secret put ALLOWED_EMAIL -c "$CFG" >/dev/null 2>&1
-echo "   ALLOWED_EMAIL set"
+if [ "$UPDATE" = no ] || ! grep -q ALLOWED_EMAIL <<<"$existing"; then
+  printf '%s' "$EMAIL" | W secret put ALLOWED_EMAIL -c "$CFG" >/dev/null 2>&1
+  echo "   ALLOWED_EMAIL set"
+fi
 # Status-only page (connected? newest text when?) for the operator, who keeps
 # the link after handing the accounts back. Status only, so it may live on disk.
 STATUS_FILE=$HOME/.config/openmessage/status-$USER_NAME.url
-if ! grep -q STATUS_KEY <<<"$existing" || [ ! -s "$STATUS_FILE" ]; then
+# An update never replaces the key: the helper's link and the uptime check use it.
+if ! grep -q STATUS_KEY <<<"$existing" || { [ "$UPDATE" = no ] && [ ! -s "$STATUS_FILE" ]; }; then
   SKEY=$(openssl rand -hex 24)
   printf '%s' "$SKEY" | W secret put STATUS_KEY -c "$CFG" >/dev/null 2>&1
   mkdir -p "$(dirname "$STATUS_FILE")"
@@ -250,6 +262,8 @@ if [ "$RECONNECT" = yes ] && ! grep -q RECONNECT_SECRET <<<"$existing"; then
   echo "   RECONNECT_SECRET set"
 fi
 if [ "$AUTH" = access ]; then
+  yn=n
+elif [ "$UPDATE" = yes ] && grep -q GOOGLE_CLIENT_SECRET <<<"$existing" && grep -q GOOGLE_CLIENT_ID <<<"$existing"; then
   yn=n
 elif grep -q GOOGLE_CLIENT_SECRET <<<"$existing" && grep -q GOOGLE_CLIENT_ID <<<"$existing"; then
   read -rp "   Google OAuth client already set. Replace it? [y/N] " yn

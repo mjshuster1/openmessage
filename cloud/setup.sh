@@ -7,7 +7,13 @@
 # Start it from https://shell.cloud.google.com/?show=terminal by pasting
 # (CLIENT-SETUP.md has this line with your address in it):
 #
-#   [ -d openmessage ] || git clone --depth 1 https://github.com/mjshuster1/openmessage; openmessage/cloud/setup.sh --helper-email you@example.com
+#   git -C openmessage pull -q 2>/dev/null || git clone -q --depth 1 https://github.com/mjshuster1/openmessage; openmessage/cloud/setup.sh --helper-email you@example.com
+#
+# The same line ending in --update refreshes the connector on an existing setup
+# (same address, sign-in and links); ending in --remove deletes the whole setup
+# after asking. Both find the setup from the accounts, so they still work after
+# Cloud Shell has cleared its files. Running plain setup when one already exists
+# says so, rather than building a second server.
 #
 # --helper-email: who else gets status emails and the setup-finished email
 # (status only, never messages). Run the same line again to carry on after any
@@ -16,10 +22,13 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 HELPER_EMAIL=
+MODE=setup
 while [ $# -gt 0 ]; do
   case "$1" in
     --helper-email) HELPER_EMAIL=$2; shift 2 ;;
-    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+    --update) MODE=update; shift ;;
+    --remove) MODE=remove; shift ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -53,19 +62,45 @@ gcloud auth print-access-token >/dev/null 2>&1 || stop "Couldn't reach your Goog
 EMAIL=$(gcloud config get-value account 2>/dev/null | tr '[:upper:]' '[:lower:]')
 [[ "$EMAIL" == *@*.* ]] || stop "Cloud Shell isn't signed in to a Google account."
 open_billing=$(gcloud billing accounts list --filter='open=true' --format='value(name)' 2>/dev/null | grep -c . || true)
-[ "$open_billing" -gt 0 ] || stop "✗ No billing on this Google account yet. Add a card at https://console.cloud.google.com/billing (about \$3.65 a month)."
-[ "$open_billing" = 1 ] || echo "  (You have $open_billing billing accounts; setup will ask which one.)"
-echo "  ✓ Signed in as $EMAIL, billing is on"
+[ "$MODE" != setup ] || [ "$open_billing" -gt 0 ] || stop "✗ No billing on this Google account yet. Add a card at https://console.cloud.google.com/billing (about \$4 a month)."
+[ "$MODE" != setup ] || [ "$open_billing" = 1 ] || echo "  (You have $open_billing billing accounts; setup will ask which one.)"
+echo "  ✓ Signed in as $EMAIL"
 
 # ---------------------------------------------------------------- answers
 USER_NAME= LABEL= PROJECT= TIMEZONE=
 # shellcheck disable=SC1090
 [ -f "$ANSWERS" ] && . "$ANSWERS"
-if [ -n "$USER_NAME" ] && grep -qx "$USER_NAME" "$STATE_DIR/handed-back" 2>/dev/null; then
-  echo
-  echo "Setup already finished for $LABEL, so nothing was changed."
-  echo "Your links came by email. If something's wrong, contact whoever helped you set this up."
-  exit 0
+# The setup these accounts already have: project, VM and zone. Cloud Shell's
+# files may be long gone, so this asks Google, not the answers file.
+find_existing() {
+  FOUND_PROJECT= FOUND_VM= FOUND_ZONE=
+  local p line
+  for p in $(gcloud projects list --filter='projectId~^openmessage-' --format='value(projectId)' 2>/dev/null </dev/null || true); do
+    line=$(gcloud compute instances list --project "$p" --filter='name~^om-' --format='value(name,zone.basename())' 2>/dev/null </dev/null | head -1 || true)
+    if [ -n "$line" ]; then
+      FOUND_PROJECT=$p FOUND_VM=${line%%[[:space:]]*} FOUND_ZONE=${line##*[[:space:]]}
+      return 0
+    fi
+  done
+  return 1
+}
+already_line() {
+  echo "You already have a setup: server $FOUND_VM in project $FOUND_PROJECT."
+  echo "Nothing was changed. To refresh it, or to delete it, paste the same line with"
+  echo "--update or --remove on the end, or contact whoever helped you set this up."
+}
+if [ "$MODE" = setup ]; then
+  if [ -n "$USER_NAME" ] && grep -qx "$USER_NAME" "$STATE_DIR/handed-back" 2>/dev/null; then
+    echo
+    echo "Setup already finished for $LABEL, so nothing was changed."
+    echo "Your links came by email. To refresh it, or to delete it, paste the same line"
+    echo "with --update or --remove on the end."
+    exit 0
+  fi
+  if [ -z "$USER_NAME" ] && find_existing; then echo; already_line; exit 0; fi
+else
+  find_existing || stop "✗ No setup found in this Google account ($EMAIL)."
+  USER_NAME=${FOUND_VM#om-} PROJECT=$FOUND_PROJECT
 fi
 if [ -z "$USER_NAME" ]; then
   while :; do
@@ -124,6 +159,31 @@ if [ -z "$sub" ]; then
 fi
 unset TOKEN
 echo "  ✓ Signed in as $(jq -r '.email // "your account"' <<<"$who"), Workers address $sub.workers.dev"
+
+if [ "$MODE" = update ]; then
+  echo
+  echo "Refreshing your connector (its address, sign-in and links stay the same)."
+  (cd "$HERE/worker" && ./setup-connector.sh --update --account-confirmed --user "$USER_NAME" --email "$EMAIL" \
+     --tunnel "$FOUND_VM" --worker "$FOUND_VM" --reconnect --project "$PROJECT" \
+     --public-url "https://$FOUND_VM.$sub.workers.dev") >/dev/null || stop "✗ The refresh didn't finish."
+  W logout >/dev/null 2>&1 || true
+  echo "  ✓ Done. Nothing else changed. You can close this tab."
+  exit 0
+fi
+if [ "$MODE" = remove ]; then
+  cat <<EOF
+
+This deletes your texts setup for good: the server, the texts stored on it, its
+backups and your connector. Your texts on your phone aren't touched. Google
+keeps the deleted project recoverable for 30 days, and then it's gone.
+EOF
+  "$HERE/teardown.sh" --user "$USER_NAME" --project "$PROJECT" --zone "$FOUND_ZONE" --name "$FOUND_VM" \
+    --tunnel "$FOUND_VM" --worker "$FOUND_VM" --delete-project || stop "✗ Not everything was removed (see above)."
+  W logout >/dev/null 2>&1 || true
+  rm -f "$ANSWERS"
+  echo "  ✓ Removed. You can close this tab."
+  exit 0
+fi
 
 echo
 echo "All checks passed. Project: $PROJECT"

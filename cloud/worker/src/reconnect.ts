@@ -12,6 +12,7 @@ import { handleSpam } from "./spam";
  *   GET  /reconnect/state      connection + pairing state (owner session, or app token)
  *   POST /reconnect/upload     the Reconnect app sends the Google login (app token)
  *   /reconnect/spam...         the client's spam rules (spam.ts; same sign-in)
+ *   POST /reconnect/server     restart, or go back a version (owner session, this page only)
  *
  * The page hands the client a short-lived "reconnect code" (the connector
  * URL plus an upload token signed with RECONNECT_SECRET, 20 minutes). The
@@ -27,6 +28,7 @@ import { handleSpam } from "./spam";
  */
 export const RECONNECT_PREFIX = "/reconnect";
 const PAIR_URL = "http://127.0.0.1:7011/pair";
+const SERVER_URL = "http://127.0.0.1:7011/server";
 const ORIGIN_STATUS_URL = "http://127.0.0.1:7007/api/status";
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -261,7 +263,42 @@ async function readState(env: Env): Promise<ReconnectState> {
 
 export const escapeHtml = (v: string) => v.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-function page(env: Env, code: string, st: ReconnectState): string {
+interface ServerInfo {
+  version: string;
+  previous_version: string;
+  actions_left_today: number | null;
+}
+
+/** The fix-it buttons' facts, or null if the helper is missing or too old to have them. */
+async function serverInfo(env: Env): Promise<ServerInfo | null> {
+  if (!env.PAIR) return null;
+  try {
+    const r = await env.PAIR.fetch(SERVER_URL, { method: "GET", headers: { Accept: "application/json" } });
+    if (!r.ok) return null;
+    const s = (await r.json()) as Record<string, unknown>;
+    return {
+      version: typeof s.version === "string" ? s.version.slice(0, 60) : "",
+      previous_version: typeof s.previous_version === "string" ? s.previous_version.slice(0, 60) : "",
+      actions_left_today: typeof s.actions_left_today === "number" ? s.actions_left_today : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function fixSection(info: ServerInfo | null): string {
+  if (!info) return "";
+  const back = info.previous_version
+    ? `<p><button class="fix" data-action="go_back" data-ask="Go back to version ${escapeHtml(info.previous_version)}?">Go back to the previous version</button><br><small>Only if it stopped working right after an update.</small></p>`
+    : "";
+  return `<h2 style="font-size:1.15em;margin-top:1.6em">Something else not working?</h2>
+<p><button class="fix" data-action="restart" data-ask="Restart your server? It takes about a minute.">Restart my server</button><br><small>Safe to try. No texts are lost; it catches up afterwards.</small></p>
+${back}
+<p id="fixed"></p>
+<p><small>Version ${escapeHtml(info.version || "unknown")}.</small></p>`;
+}
+
+function page(env: Env, code: string, st: ReconnectState, info: ServerInfo | null = null): string {
   const base = ((env.RECONNECT_DOWNLOAD_URL ?? "").trim() || DEFAULT_DOWNLOAD).replace(/\/+$/, "");
   const mac = escapeHtml(`${base}/om-reconnect-mac.zip`);
   const win = escapeHtml(`${base}/om-reconnect-windows.exe`);
@@ -294,6 +331,7 @@ ${helperNote}
 </ol>
 <div id="live">Waiting for the app…</div>
 <div id="emoji"></div>
+${fixSection(info)}
 <p><small>Also here: <a href="${RECONNECT_PREFIX}/spam">your spam rules</a>.</small></p>
 <p><small>Your Google sign-in goes from that private window straight to your own server, which uses it once to pair and then deletes it. Nobody else sees it. Up to 3 tries a day.</small></p>
 <script>
@@ -302,6 +340,18 @@ document.getElementById("copy").onclick = async () => {
   try { await navigator.clipboard.writeText(code); document.getElementById("copied").textContent = "Copied."; }
   catch { prompt("Copy this code:", code); }
 };
+for (const b of document.querySelectorAll("button.fix")) {
+  b.onclick = async () => {
+    if (!confirm(b.dataset.ask)) return;
+    const out = document.getElementById("fixed");
+    out.textContent = "Working on it…";
+    try {
+      const r = await fetch("${RECONNECT_PREFIX}/server", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: b.dataset.action }) });
+      const d = await r.json().catch(() => ({}));
+      out.textContent = r.ok ? "Done. Give it a few minutes, then ask Claude for your latest texts." : (d.error || "That didn't work.");
+    } catch { out.textContent = "That didn't work. Try again in a minute."; }
+  };
+}
 async function poll() {
   try {
     const r = await fetch("${RECONNECT_PREFIX}/state", { credentials: "same-origin", cache: "no-store" });
@@ -332,6 +382,30 @@ export async function handleReconnect(request: Request, env: Env): Promise<Respo
   }
 
   if (sub === "/spam" || sub.startsWith("/spam/")) return handleSpam(request, env, sub.slice("/spam".length) || "/");
+
+  if (sub === "/server") {
+    if (request.method !== "POST") return plain("Method not allowed", 405);
+    if (!(await owner(request, env))) return json({ error: "sign in again" }, 401);
+    // Only this page may do this: the cookie alone isn't enough.
+    if (request.headers.get("Origin") !== new URL(env.PUBLIC_URL).origin) return json({ error: "forbidden" }, 403);
+    if (!env.PAIR) return json({ error: "This isn't switched on for this server." }, 501);
+    const raw = await request.text();
+    if (raw.length > 1024) return json({ error: "bad request" }, 400);
+    let action: unknown;
+    try {
+      action = (JSON.parse(raw) as { action?: unknown }).action;
+    } catch {
+      return json({ error: "bad request" }, 400);
+    }
+    if (action !== "restart" && action !== "go_back") return json({ error: "bad request" }, 400);
+    try {
+      const up = await env.PAIR.fetch(SERVER_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
+      const reply = (await up.json().catch(() => ({}))) as Record<string, unknown>;
+      return json(typeof reply.error === "string" ? { error: reply.error.slice(0, 300) } : { ok: true }, up.status);
+    } catch {
+      return json({ error: "Your server isn't answering. Try again in a few minutes." }, 502);
+    }
+  }
 
   if (sub === "/upload") {
     if (request.method !== "POST") return plain("Method not allowed", 405);
@@ -380,8 +454,8 @@ export async function handleReconnect(request: Request, env: Env): Promise<Respo
     const force = new URL(request.url).searchParams.get("force") === "1";
     const token = await sign(env, { p: "upload", e: email, f: force, x: Math.floor(Date.now() / 1000) + UPLOAD_TTL_S });
     const code = CODE_PREFIX + b64url(enc.encode(JSON.stringify({ u: env.PUBLIC_URL, t: token })));
-    const st = await readState(env);
-    return new Response(page(env, code, st), {
+    const [st, info] = await Promise.all([readState(env), serverInfo(env)]);
+    return new Response(page(env, code, st, info), {
       status: 200,
       headers: {
         ...baseHeaders("text/html; charset=utf-8"),

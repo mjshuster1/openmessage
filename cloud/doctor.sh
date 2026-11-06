@@ -222,6 +222,11 @@ check_vm() {
   fi
   [ "$(v log_timer)" = active ] || warn "status log timer isn't running (alerts depend on it)"
   if [ "$(v update_timer)" = active ]; then ok "automatic updates on"; fi
+  if G compute disks describe "$NAME" --zone "$ZONE" --format='value(resourcePolicies)' 2>/dev/null | grep -q /om-nightly; then
+    ok "nightly backups on"
+  else
+    warn "no nightly backups"; fix "cloud/vm/set-backups.sh --name $NAME --zone $ZONE --project ${PROJECT:-<id>}"
+  fi
   local disk; disk=$(v disk_pct)
   if [ -n "$disk" ] && [ "$disk" -ge 85 ]; then warn "disk ${disk}% full"; fi
 

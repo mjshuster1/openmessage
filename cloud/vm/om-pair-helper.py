@@ -25,6 +25,14 @@ change their own rules with no operator access:
                      replaces spam-rules.json; OpenMessage reloads it by itself
   POST /spam/action  {"conversation_id": "...", "action": "block_and_report"|"unblock"}
 
+And the page's two fix-it buttons, so a client can try these without anyone
+else's access (MAX_SERVER_ACTIONS a day, not during a reconnect):
+
+  GET  /server       {"version", "previous_version", "actions_left_today", "message"}
+  POST /server       {"action": "restart"}   restart OpenMessage
+                     {"action": "go_back"}   the previous version, as om-update
+                                             does when an update fails
+
 Runs as root (it stops and starts openmessage.service) on 127.0.0.1 only,
 from om-pair.service. Status only in responses and logs: never cookie
 values. At most MAX_PER_DAY tries a day, one at a time: repeated pairings can
@@ -67,6 +75,11 @@ MAX_PHRASE = 200
 RECENT_ENTRIES = 50
 LOG_TAIL_BYTES = 256 * 1024
 SPAM_ACTIONS = ("block_and_report", "unblock")
+STAMP = os.environ.get("OM_STAMP", "/var/lib/openmessage-release")
+SKIP = os.environ.get("OM_SKIP", os.path.join(DATA_DIR, "update-skip"))
+PREV_DIR = os.environ.get("OM_PREV_DIR", "/var/lib/openmessage-prev")
+NOTIFY = os.environ.get("OM_NOTIFY", "/usr/local/bin/om-notify")
+MAX_SERVER_ACTIONS = int(os.environ.get("OM_SERVER_MAX_PER_DAY", "5"))
 
 # Commands, swappable for tests.
 def _systemctl(*args):
@@ -98,12 +111,14 @@ class State:
     def __init__(self):
         self.lock = threading.Lock()
         self.job = {"state": "idle", "emoji": None, "message": "", "started_ms": None, "updated_ms": now_ms()}
-        self.tries = self._load_tries()
+        self.tries = self._load_list("tries_ms")
+        self.server_actions = self._load_list("server_ms")
+        self.server_message = ""
 
-    def _load_tries(self):
+    def _load_list(self, key):
         try:
             with open(STATE_FILE) as f:
-                return [int(t) for t in json.load(f).get("tries_ms", [])]
+                return [int(t) for t in json.load(f).get(key, [])]
         except (OSError, ValueError, TypeError, AttributeError):
             return []
 
@@ -111,7 +126,7 @@ class State:
         tmp = STATE_FILE + ".tmp"
         try:
             with open(tmp, "w") as f:
-                json.dump({"tries_ms": self.tries}, f)
+                json.dump({"tries_ms": self.tries, "server_ms": self.server_actions}, f)
             os.replace(tmp, STATE_FILE)
         except OSError as e:
             log(f"couldn't save tries: {e}")
@@ -120,6 +135,11 @@ class State:
         cutoff = now_ms() - 86_400_000
         self.tries = [t for t in self.tries if t > cutoff]
         return len(self.tries)
+
+    def server_actions_today(self):
+        cutoff = now_ms() - 86_400_000
+        self.server_actions = [t for t in self.server_actions if t > cutoff]
+        return len(self.server_actions)
 
     def snapshot(self):
         with self.lock:
@@ -226,6 +246,61 @@ def run_job(cookies):
             log("connected")
         else:
             STATE.set(state="failed", message="Paired, but it isn't connected yet. Wait 10 minutes; if alerts still say it's down, try once more.")
+
+
+def stamped_version(path):
+    """The release tag in a stamp file (source@tag), or ""."""
+    try:
+        with open(path) as f:
+            text = f.read().strip()
+    except OSError:
+        return ""
+    return text.split("@", 1)[1] if "@" in text else text
+
+
+def server_info():
+    current = stamped_version(STAMP)
+    previous = stamped_version(os.path.join(PREV_DIR, "release"))
+    if not os.path.exists(os.path.join(PREV_DIR, "openmessage")) or previous == current:
+        previous = ""
+    with STATE.lock:
+        left = max(0, MAX_SERVER_ACTIONS - STATE.server_actions_today())
+        message = STATE.server_message
+    return {"version": current, "previous_version": previous, "actions_left_today": left, "message": message}
+
+
+def run_server_action(action, current, previous):
+    def done(text):
+        with STATE.lock:
+            STATE.server_message = text
+    try:
+        if action == "go_back":
+            tmp = OPENMESSAGE + ".goback"
+            with open(os.path.join(PREV_DIR, "openmessage"), "rb") as src, open(tmp, "wb") as dst:
+                dst.write(src.read())
+            os.chmod(tmp, 0o755)
+            os.replace(tmp, OPENMESSAGE)
+            with open(os.path.join(PREV_DIR, "release")) as src, open(STAMP, "w") as dst:
+                dst.write(src.read())
+            with open(SKIP, "w") as f:  # don't take this one again; a newer one is fine
+                f.write(current + "\n")
+        ok = SYSTEMCTL("restart", "openmessage")
+        if action == "go_back":
+            log(f"went back from {current} to {previous}")
+            try:
+                subprocess.run([NOTIFY, "Texts: server went back a version",
+                                f"The owner went back from {current} to {previous} on their page. Check that release.",
+                                "WARNING"], capture_output=True, timeout=30)
+            except (OSError, subprocess.SubprocessError):
+                pass
+            done(f"Went back to {previous}. Give it a few minutes." if ok else "That didn't work. Contact whoever set this up.")
+        else:
+            log("restarted by the owner")
+            done("Restarted. Give it a few minutes." if ok else "The restart didn't work. Contact whoever set this up.")
+    except Exception as e:  # keep the service running whatever happened
+        log(f"server action error: {type(e).__name__}")
+        SYSTEMCTL("restart", "openmessage")
+        done("That didn't work. Contact whoever set this up.")
 
 
 def read_rules():
@@ -383,6 +458,8 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 "recent": recent_spam(),
             })
+        if path == "/server":
+            return self._send(200, server_info())
         if path != "/pair":
             return self._send(404, {"error": "not found"})
         self._send(200, STATE.snapshot())
@@ -391,7 +468,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_ok():
             return self._send(403, {"error": "forbidden"})
         path = self.path.split("?")[0]
-        if path not in ("/pair", "/spam", "/spam/action"):
+        if path not in ("/pair", "/spam", "/spam/action", "/server"):
             return self._send(404, {"error": "not found"})
         try:
             n = int(self.headers.get("Content-Length") or 0)
@@ -403,6 +480,24 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n))
         except ValueError:
             return self._send(400, {"error": "bad request"})
+        if path == "/server":
+            action = body.get("action") if isinstance(body, dict) else None
+            if action not in ("restart", "go_back"):
+                return self._send(400, {"error": "bad request"})
+            info = server_info()
+            if action == "go_back" and not info["previous_version"]:
+                return self._send(409, {"error": "There's no earlier version to go back to."})
+            with STATE.lock:
+                if STATE.busy():
+                    return self._send(409, {"error": "A reconnect is running. Try again when it's finished."})
+                if STATE.server_actions_today() >= MAX_SERVER_ACTIONS:
+                    return self._send(429, {"error": "That's been tried several times today. Contact whoever set this up."})
+                STATE.server_actions.append(now_ms())
+                STATE._save_tries()
+                STATE.server_message = "Working on it…"
+            threading.Thread(target=run_server_action, args=(action, info["version"], info["previous_version"]),
+                             daemon=True).start()
+            return self._send(202, {"ok": True})
         if path == "/spam":
             phrases, numbers, err = clean_rules(body)
             if err:

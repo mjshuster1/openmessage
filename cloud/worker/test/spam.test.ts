@@ -111,3 +111,72 @@ describe("spam page", () => {
     expect(tools.some((t: string) => /spam|block/.test(t))).toBe(false);
   });
 });
+
+describe("server buttons", () => {
+  const info = (over: Record<string, unknown> = {}) => ({ version: "v1-vm8", previous_version: "v1-vm7", actions_left_today: 5, ...over });
+  const pairFor = (over?: Record<string, unknown>) =>
+    pairBinding((url, init) => {
+      if (url.endsWith("/server") && init.method === "GET") return jsonReply(info(over));
+      if (url.endsWith("/server")) return new Response(JSON.stringify({ ok: true }), { status: 202 });
+      return jsonReply({ state: "idle", tries_left_today: 3 });
+    });
+  const originBinding = { fetch: async () => jsonReply({ google: { connected: true } }) } as unknown as Fetcher;
+
+  async function page(p: ReturnType<typeof pairFor>) {
+    const e = envWith(p.f, { ORIGIN: originBinding });
+    const res = await worker.fetch(get("/reconnect", { Cookie: await cookie(e) }), e, ctx);
+    return res.text();
+  }
+
+  it("shows both buttons when there's a version to go back to", async () => {
+    const html = await page(pairFor());
+    expect(html).toContain("Restart my server");
+    expect(html).toContain("Go back to the previous version");
+    expect(html).toContain("v1-vm7");
+  });
+
+  it("hides go-back when there's none", async () => {
+    const html = await page(pairFor({ previous_version: "" }));
+    expect(html).toContain("Restart my server");
+    expect(html).not.toContain("Go back to the previous version");
+  });
+
+  it("hides the buttons on an older server", async () => {
+    const html = await page(pairBinding((url) => (url.endsWith("/server") ? new Response("{}", { status: 404 }) : jsonReply({ state: "idle" }))));
+    expect(html).not.toContain("Restart my server");
+  });
+
+  it("escapes a version from the server", async () => {
+    const html = await page(pairFor({ previous_version: '"><img src=x>' }));
+    expect(html).not.toContain("<img src=x>");
+  });
+
+  it("the Reconnect and spam pages' scripts parse", async () => {
+    const pages = [await page(pairFor())];
+    const e = envWith(pairBinding().f);
+    pages.push(await (await worker.fetch(get("/reconnect/spam", { Cookie: await cookie(e) }), e, ctx)).text());
+    for (const html of pages) {
+      const script = /<script>([\s\S]*)<\/script>/.exec(html)![1]!;
+      expect(() => new Function(`return async () => {${script}}`)).not.toThrow();
+    }
+  });
+
+  it("refuses without a sign-in, and from another site", async () => {
+    const p = pairFor();
+    const e = envWith(p.f);
+    expect((await worker.fetch(post("/reconnect/server", { action: "restart" }), e, ctx)).status).toBe(401);
+    const c = await cookie(e);
+    expect((await worker.fetch(post("/reconnect/server", { action: "restart" }, { Cookie: c, Origin: "https://evil.example" }), e, ctx)).status).toBe(403);
+    expect(p.calls).toHaveLength(0);
+  });
+
+  it("passes on only a known action", async () => {
+    const p = pairFor();
+    const e = envWith(p.f);
+    const c = await cookie(e);
+    expect((await worker.fetch(post("/reconnect/server", { action: "rm -rf" }, { Cookie: c }), e, ctx)).status).toBe(400);
+    expect(p.calls).toHaveLength(0);
+    expect((await worker.fetch(post("/reconnect/server", { action: "go_back", extra: 1 }, { Cookie: c }), e, ctx)).status).toBe(202);
+    expect(JSON.parse(p.calls[0]!.init.body as string)).toEqual({ action: "go_back" });
+  });
+});

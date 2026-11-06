@@ -3,6 +3,10 @@
 #
 #   cloud/vm/release-vm.sh <tag> [owner/repo]     (default repo: mjshuster1/openmessage)
 #
+# VMs wait a few days before taking a release (om-update.sh). For a fix that
+# can't wait, OM_URGENT=1 titles it "(urgent)" and they take it at their next
+# daily check.
+#
 # Assets: openmessage-linux-amd64.tar.gz, openmessage-linux-arm64.tar.gz
 # (the binary, same layout as .github/workflows/release.yml),
 # openmessage-vm.tar.gz (this folder's units and scripts, under vm/), the
@@ -47,7 +51,7 @@ git archive --format=tar --prefix=vm/ HEAD:cloud/vm | gzip -n > "$OUT/openmessag
 cat "$OUT/SHA256SUMS"
 
 gh release create "$TAG" --repo "$REPO" --target "$COMMIT" \
-  --title "OpenMessage $TAG (VM)" \
+  --title "OpenMessage $TAG (VM)${OM_URGENT:+ (urgent)}" \
   --notes "Linux binaries and VM files built from $COMMIT for cloud/vm/create-vm.sh. Built locally with cloud/vm/release-vm.sh." \
   "$OUT/openmessage-linux-amd64.tar.gz" "$OUT/openmessage-linux-arm64.tar.gz" \
   "$OUT/openmessage-vm.tar.gz" "$OUT/om-reconnect-mac.zip" "$OUT/om-reconnect-windows.exe" "$OUT/SHA256SUMS"

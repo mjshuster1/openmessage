@@ -9,6 +9,11 @@
 # binary back, restarts, skips that release from then on, and sends an alert
 # (if alerts are set up). A release it skipped is retried only if a newer one
 # appears.
+#
+# A new release waits a few days before this VM takes it (om-update-wait-days,
+# default 3), so the operator's own server finds a bad release first: set 0 on
+# that one. A clients' VM can't be fixed by hand once it's handed back. A
+# release titled "(urgent)" (release-vm.sh with OM_URGENT=1) doesn't wait.
 set -eu
 
 log() { echo "om-update: $*"; logger -t om-update "$*" 2>/dev/null || true; }
@@ -23,12 +28,24 @@ REPO=$(md om-repo)
 [ "$(md om-release)" = latest ] || { log "om-release isn't 'latest'; nothing to do"; exit 0; }
 [ "$(md om-auto-update)" != no ] || { log "om-auto-update=no; nothing to do"; exit 0; }
 
-STAMP=/var/lib/openmessage-release
-SKIP=/var/lib/openmessage/update-skip
+STAMP=${OM_STAMP:-/var/lib/openmessage-release}
+SKIP=${OM_SKIP:-/var/lib/openmessage/update-skip}
+PREV=${OM_PREV_DIR:-/var/lib/openmessage-prev}
+BIN=${OM_BIN:-/usr/local/bin/openmessage}
+WAIT=$(md om-update-wait-days)
+case "$WAIT" in ''|*[!0-9]*) WAIT=3 ;; esac
 current=$(cut -d@ -f2 "$STAMP" 2>/dev/null || true)
+curn=$(printf '%s' "$current" | sed -nE 's/.*-vm([0-9]+)$/\1/p')
+# Newest first. Stop at the current release, and never pick an older one, so a
+# held release never means going backwards.
 latest=$(curl -fsSL -m 30 "https://api.github.com/repos/$REPO/releases?per_page=30" \
-  | grep -oE '"tag_name": *"[^"]+-vm[0-9]+"' | head -1 | sed -E 's/.*"([^"]+)"$/\1/' || true)
-[ -n "$latest" ] || { log "couldn't list releases on $REPO; will retry tomorrow"; exit 0; }
+  | jq -r --arg cur "$current" --argjson wait "$WAIT" --argjson curn "${curn:-0}" '
+      [.[] | select((.draft | not) and (.prerelease | not) and (.tag_name | test("-vm[0-9]+$")))
+           | select((.tag_name | capture("-vm(?<n>[0-9]+)$").n | tonumber) >= $curn)
+           | select(.tag_name == $cur or ((.name // "") | test("\\(urgent\\)"))
+                    or ((now - (.published_at | fromdateiso8601)) >= ($wait * 86400)))
+      ][0].tag_name // empty' 2>/dev/null || true)
+[ -n "$latest" ] || { log "no newer release is ready on $REPO, or couldn't list them; will retry tomorrow"; exit 0; }
 [ "$latest" != "$current" ] || { log "up to date ($current)"; exit 0; }
 if [ "$(cat "$SKIP" 2>/dev/null)" = "$latest" ]; then
   log "$latest was rolled back before; waiting for a newer release"
@@ -37,12 +54,12 @@ fi
 
 was=no
 connected && was=yes
-mkdir -p /var/lib/openmessage-prev
-cp -p /usr/local/bin/openmessage /var/lib/openmessage-prev/openmessage
-cp -p "$STAMP" /var/lib/openmessage-prev/release 2>/dev/null || true
+mkdir -p "$PREV"
+cp -p "$BIN" "$PREV/openmessage"
+cp -p "$STAMP" "$PREV/release" 2>/dev/null || true
 
 log "updating $current -> $latest"
-if ! OM_TAG=$latest /usr/local/sbin/om-install-release; then
+if ! OM_TAG=$latest "${OM_INSTALL:-/usr/local/sbin/om-install-release}"; then
   log "install of $latest failed; nothing changed"
   exit 1
 fi
@@ -56,8 +73,8 @@ if [ "$was" = yes ]; then
     i=$((i + 1))
   done
   log "$latest didn't reconnect within 5 minutes; rolling back to $current"
-  install -m 755 /var/lib/openmessage-prev/openmessage /usr/local/bin/openmessage
-  cp -p /var/lib/openmessage-prev/release "$STAMP" 2>/dev/null || true
+  install -m 755 "$PREV/openmessage" "$BIN"
+  cp -p "$PREV/release" "$STAMP" 2>/dev/null || true
   echo "$latest" > "$SKIP"
   systemctl restart openmessage
   sync

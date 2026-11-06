@@ -61,6 +61,17 @@ commands for you to run.
   time: you sign in to Google when asked, then tap the matching emoji on your
   phone.
 
+## If something's wrong
+
+- **You'll get an email** if it loses Google Messages, or if its server stops
+  answering for about 20 minutes.
+- **If it's in your own accounts,** your Reconnect page has the fixes: reconnect
+  to Google, **Restart my server**, and, right after an update goes wrong, **Go
+  back to the previous version**. None of them lose texts. If the page itself
+  won't open, check that your Google Cloud billing card still works, and restart
+  the VM in Google Cloud under Compute Engine.
+- **Backups:** the server's disk is backed up every night and kept for 7 days.
+
 ## Spam
 
 Texts from strangers that match your spam rules are listed for you, and can
@@ -84,8 +95,14 @@ Any of these stops it, from least to most permanent:
    read your texts).
 2. Google Messages: Settings, Device pairing, remove the device (the server
    stops receiving texts).
-3. Ask the person who runs your service to delete your setup. That erases
-   the stored texts and the Google sign-in it holds.
+3. Delete the setup, which erases the stored texts, their backups and the
+   Google sign-in it holds.
+   - **If it's in your own accounts:** do it yourself in Google Cloud: open
+     console.cloud.google.com, IAM & Admin, Settings, and Shut down the
+     OpenMessage project. Google can restore it for 30 days, then it's gone.
+     Whoever helped you can also send you one line to paste, which also cleans
+     up your Cloudflare account.
+   - **If it's hosted for you:** ask the person who runs your service.
 
 ## Privacy, plainly
 

@@ -10,7 +10,7 @@
 # 3. turns on the Compute Engine API (takes a minute the first time);
 # 4. adds a monthly budget alert (default $10) that emails the billing
 #    account's admins at 50% and 100%. It alerts, it doesn't stop anything.
-#    Expected cost is about $3.65/month (the VM's IPv4 address).
+#    Expected cost is about $4/month (the VM's IPv4 address, plus backups).
 # --check only reports what's missing and changes nothing.
 set -euo pipefail
 
