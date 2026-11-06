@@ -33,7 +33,8 @@ reopen it and paste the line again.
 
 ## Afterwards
 
-Their setup email includes a status link. Give it to Claude Code to add them to
+Their setup email includes a status link. The email can occasionally be
+dropped, so have them copy the links off the screen too. Give the link to Claude Code to add them to
 your list of clients:
 
 ```bash

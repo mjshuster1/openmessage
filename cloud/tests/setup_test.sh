@@ -130,6 +130,7 @@ has "connector doesn't re-ask the account" "--account-confirmed" "$(grep setup-c
 has "connector has Reconnect on" "--reconnect" "$(grep setup-connector <<<"$calls")"
 has "mails both people" "--email h@x.co --email mike@example.com" "$calls"
 has "emails the links" "om-notify" "$calls"
+has "also shows them on screen" "Status link for your helper: https://om-mike.x.workers.dev/status?key=abc123" "$out"
 has "links include the status link" "key=abc123" "$(grep om-notify <<<"$calls")"
 has "links include the spam page" "reconnect/spam" "$(grep om-notify <<<"$calls")"
 has "report says no other computer had the sign-ins" "no other computer ever had" "$out"
@@ -173,7 +174,8 @@ cat >> "$B/gcloud" <<'EOF'
 case "$*" in *"om-notify"*) exit 1 ;; esac
 EOF
 out=$("$C/deploy.sh" --client-owned --from-browser --user mike --email mike@example.com --project openmessage-mike-ab12 --alert-email mike@example.com <<<$'\n\n\n' 2>&1)
-has "shows the links instead" "Copy these and keep them" "$out"
+has "shows the links" "Copy these and keep them" "$out"
+hasnt "doesn't claim an email went out" "should also reach you" "$out"
 has "same address only mailed once" "--project openmessage-mike-ab12 --email mike@example.com" "$(grep set-email-alerts "$LOG")"
 hasnt "not twice" "--email mike@example.com --email" "$(grep set-email-alerts "$LOG")"
 done_sandbox

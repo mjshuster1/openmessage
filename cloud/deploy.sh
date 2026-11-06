@@ -267,10 +267,15 @@ EOF
     msg="Claude connector: $URL | Reconnect page: $RC_LINK | Spam rules: $RC_LINK/spam | Status link for your helper: $STATUS_LINK"
     if [ "$ALERTS" = email ] && gcloud compute ssh --quiet "$NAME" --zone "$ZONE" --project "$PROJECT" -- \
          "sudo om-notify $(printf '%q' "$LABEL: your links for texts in Claude") $(printf '%q' "$msg") NOTICE" 2>/dev/null; then
-      echo "Your links are on their way by email (within a few minutes)."
+      emailed=yes
     else
-      echo "Copy these and keep them:"; tr '|' '\n' <<<"$msg"
+      emailed=no
     fi
+    # Always on screen too: alert emails are limited to one per 5 minutes, so
+    # this one can be dropped right after another notice.
+    echo "Your links. Copy these and keep them, and send your helper the status link:"
+    tr '|' '\n' <<<"$msg" | sed 's/^ */  /'
+    [ "$emailed" = no ] || echo "They should also reach you by email within a few minutes."
   fi
   header "8/8 Hand back"
   "$HERE/handback.sh" --user "$USER_NAME" --email "$EMAIL" --project "$PROJECT" --zone "$ZONE" --name "$NAME" \
