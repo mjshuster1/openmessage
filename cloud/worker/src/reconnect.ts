@@ -1,6 +1,7 @@
 import { ACCESS_JWT_HEADER, accessConfig, verifyAccessJwt } from "./access";
 import { isAllowedEmail, normalizeEmail } from "./auth";
 import type { Env } from "./env";
+import { handleSpam } from "./spam";
 
 /**
  * The Reconnect page: lets the client re-pair Google Messages themselves,
@@ -10,6 +11,7 @@ import type { Env } from "./env";
  *   GET  /reconnect/callback   Google sign-in return (Google mode)
  *   GET  /reconnect/state      connection + pairing state (owner session, or app token)
  *   POST /reconnect/upload     the Reconnect app sends the Google login (app token)
+ *   /reconnect/spam...         the client's spam rules (spam.ts; same sign-in)
  *
  * The page hands the client a short-lived "reconnect code" (the connector
  * URL plus an upload token signed with RECONNECT_SECRET, 20 minutes). The
@@ -47,6 +49,7 @@ interface Claims {
   n?: string; // nonce (login)
   v?: string; // PKCE verifier (login)
   f?: boolean; // force (upload)
+  r?: string; // where to return after sign-in (login): a path under /reconnect
 }
 
 const enc = new TextEncoder();
@@ -120,21 +123,21 @@ function cookie(request: Request, name: string): string | null {
 const setCookie = (name: string, value: string, maxAge: number, path = RECONNECT_PREFIX) =>
   `${name}=${value}; Path=${path}; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`;
 
-const baseHeaders = (type: string): Record<string, string> => ({
+export const baseHeaders = (type: string): Record<string, string> => ({
   "Content-Type": type,
   "Cache-Control": "no-store",
   "X-Robots-Tag": "noindex",
   "Referrer-Policy": "no-referrer",
   "X-Frame-Options": "DENY",
 });
-const json = (body: unknown, status = 200, extra: Record<string, string> = {}) =>
+export const json = (body: unknown, status = 200, extra: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { ...baseHeaders("application/json"), ...extra } });
-const plain = (body: string, status: number) => new Response(body, { status, headers: baseHeaders("text/plain; charset=utf-8") });
+export const plain = (body: string, status: number) => new Response(body, { status, headers: baseHeaders("text/plain; charset=utf-8") });
 
-const isAccess = (env: Env) => (env.AUTH_MODE ?? "google").trim().toLowerCase() === "access";
+export const isAccess = (env: Env) => (env.AUTH_MODE ?? "google").trim().toLowerCase() === "access";
 
 /** The signed-in owner's email for page requests, or null. */
-async function owner(request: Request, env: Env): Promise<string | null> {
+export async function owner(request: Request, env: Env): Promise<string | null> {
   if (isAccess(env)) {
     const cfg = accessConfig(env);
     if (!cfg) return null;
@@ -152,10 +155,10 @@ async function pkce(): Promise<{ verifier: string; challenge: string }> {
 }
 
 /** Google mode: send the owner to Google, binding the round trip to this browser. */
-async function startLogin(env: Env): Promise<Response> {
+export async function startLogin(env: Env, returnTo?: string): Promise<Response> {
   const nonce = b64url(crypto.getRandomValues(new Uint8Array(16)));
   const { verifier, challenge } = await pkce();
-  const login = await sign(env, { p: "login", n: nonce, v: verifier, x: Math.floor(Date.now() / 1000) + LOGIN_TTL_S });
+  const login = await sign(env, { p: "login", n: nonce, v: verifier, r: returnTo, x: Math.floor(Date.now() / 1000) + LOGIN_TTL_S });
   const google = new URL(GOOGLE_AUTH_URL);
   google.search = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,
@@ -209,7 +212,7 @@ async function finishLogin(request: Request, env: Env): Promise<Response> {
   if (!email) return plain("That Google account isn't the one this connection belongs to.", 403);
   const session = await sign(env, { p: "session", e: email, x: Math.floor(Date.now() / 1000) + SESSION_TTL_S });
   const h = new Headers(baseHeaders("text/plain"));
-  h.set("Location", `${env.PUBLIC_URL}${RECONNECT_PREFIX}`);
+  h.set("Location", `${env.PUBLIC_URL}${RECONNECT_PREFIX}${login.r === "/spam" ? "/spam" : ""}`);
   h.append("Set-Cookie", setCookie(SESSION_COOKIE, session, SESSION_TTL_S));
   h.append("Set-Cookie", setCookie(LOGIN_COOKIE, "", 0));
   return new Response(null, { status: 302, headers: h });
@@ -256,7 +259,7 @@ async function readState(env: Env): Promise<ReconnectState> {
   return out;
 }
 
-const escapeHtml = (v: string) => v.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+export const escapeHtml = (v: string) => v.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 function page(env: Env, code: string, st: ReconnectState): string {
   const base = ((env.RECONNECT_DOWNLOAD_URL ?? "").trim() || DEFAULT_DOWNLOAD).replace(/\/+$/, "");
@@ -291,6 +294,7 @@ ${helperNote}
 </ol>
 <div id="live">Waiting for the app…</div>
 <div id="emoji"></div>
+<p><small>Also here: <a href="${RECONNECT_PREFIX}/spam">your spam rules</a>.</small></p>
 <p><small>Your Google sign-in goes from that private window straight to your own server, which uses it once to pair and then deletes it. Nobody else sees it. Up to 3 tries a day.</small></p>
 <script>
 const code = ${JSON.stringify(code)};
@@ -326,6 +330,8 @@ export async function handleReconnect(request: Request, env: Env): Promise<Respo
     if (isAccess(env) || request.method !== "GET") return plain("Not found", 404);
     return finishLogin(request, env);
   }
+
+  if (sub === "/spam" || sub.startsWith("/spam/")) return handleSpam(request, env, sub.slice("/spam".length) || "/");
 
   if (sub === "/upload") {
     if (request.method !== "POST") return plain("Method not allowed", 405);

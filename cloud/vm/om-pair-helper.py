@@ -17,6 +17,14 @@ start OpenMessage, and check the connection.
                state: idle | starting | waiting_for_tap | checking |
                       connected | failed
 
+It also serves the client's spam page (Worker /reconnect/spam), so they can
+change their own rules with no operator access:
+
+  GET  /spam         {"rules": {"phrases", "numbers", "mode"}, "recent": [...]}
+  POST /spam         {"phrases": [...], "numbers": [...], "mode": "log"|"block"}
+                     replaces spam-rules.json; OpenMessage reloads it by itself
+  POST /spam/action  {"conversation_id": "...", "action": "block_and_report"|"unblock"}
+
 Runs as root (it stops and starts openmessage.service) on 127.0.0.1 only,
 from om-pair.service. Status only in responses and logs: never cookie
 values. At most MAX_PER_DAY tries a day, one at a time: repeated pairings can
@@ -30,6 +38,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -47,6 +56,17 @@ MAX_BODY = 64 * 1024
 REQUIRED = ("SID", "SAPISID", "__Secure-1PSID", "__Secure-1PSIDTS")
 COOKIE_NAME = re.compile(r"^[A-Za-z0-9_.\-]{1,128}$")
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+SPAM_RULES = os.environ.get("OM_SPAM_RULES", os.path.join(DATA_DIR, "spam-rules.json"))
+SPAM_LOG = os.environ.get("OM_SPAM_LOG", os.path.join(DATA_DIR, "spam-watch.jsonl"))
+CONTROL_TOKEN = os.environ.get("OM_CONTROL_TOKEN_FILE", os.path.join(DATA_DIR, "control.token"))
+BLOCK_URL = os.environ.get("OM_BLOCK_URL", "http://127.0.0.1:7007/api/spam/block")
+MAX_PHRASES = 500
+MAX_NUMBERS = 2000
+MIN_PHRASE = 3    # shorter ones would match almost every text
+MAX_PHRASE = 200
+RECENT_ENTRIES = 50
+LOG_TAIL_BYTES = 256 * 1024
+SPAM_ACTIONS = ("block_and_report", "unblock")
 
 # Commands, swappable for tests.
 def _systemctl(*args):
@@ -208,6 +228,126 @@ def run_job(cookies):
             STATE.set(state="failed", message="Paired, but it isn't connected yet. Wait 10 minutes; if alerts still say it's down, try once more.")
 
 
+def read_rules():
+    """The whole rules file, or {} if it's missing or broken."""
+    try:
+        with open(SPAM_RULES) as f:
+            rules = json.load(f)
+        return rules if isinstance(rules, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def clean_rules(body):
+    """Validated (phrases, numbers, mode), or (None, None, an error for the client)."""
+    if not isinstance(body, dict):
+        return None, None, "bad request"
+    phrases, numbers = body.get("phrases"), body.get("numbers")
+    mode = body.get("mode")
+    if not isinstance(phrases, list) or not isinstance(numbers, list) or mode not in ("log", "block"):
+        return None, None, "bad request"
+    if len(phrases) > MAX_PHRASES or len(numbers) > MAX_NUMBERS:
+        return None, None, f"That's too many (up to {MAX_PHRASES} phrases and {MAX_NUMBERS} numbers)."
+    out_phrases, out_numbers = [], []
+    for p in phrases:
+        if not isinstance(p, str):
+            return None, None, "bad request"
+        p = p.strip()
+        if not p:
+            continue
+        if len(p) < MIN_PHRASE or len(p) > MAX_PHRASE or any(ord(c) < 32 for c in p):
+            return None, None, f'"{p[:40]}" won\'t work as a phrase: use {MIN_PHRASE} to {MAX_PHRASE} characters.'
+        if p.lower() not in (x.lower() for x in out_phrases):
+            out_phrases.append(p)
+    for n in numbers:
+        if not isinstance(n, str):
+            return None, None, "bad request"
+        if not n.strip():
+            continue
+        digits = re.sub(r"[\s().+-]", "", n)
+        if not re.fullmatch(r"[0-9]{5,15}", digits):
+            return None, None, f'"{n[:40]}" doesn\'t look like a phone number.'
+        if digits not in out_numbers:
+            out_numbers.append(digits)
+    return out_phrases, out_numbers, None
+
+
+def write_rules(phrases, numbers, mode):
+    """Replaces the file in one step, keeping settings the page doesn't show."""
+    rules = read_rules()
+    rules.update(phrases=phrases, numbers=numbers, mode=mode)
+    tmp = SPAM_RULES + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(rules, f, indent=2)
+    if not os.environ.get("OM_PAIR_CMD"):
+        import pwd
+        pw = pwd.getpwnam(SERVICE_USER)
+        os.chown(tmp, pw.pw_uid, pw.pw_gid)
+    os.replace(tmp, SPAM_RULES)
+
+
+def recent_spam():
+    """The newest log entries, newest first. The log holds message text; only the owner's page asks."""
+    try:
+        with open(SPAM_LOG, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - LOG_TAIL_BYTES))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+        if size > LOG_TAIL_BYTES:
+            lines = lines[1:]  # the first line is probably cut
+    except OSError:
+        return []
+    out = []
+    for line in reversed(lines):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(e, dict):
+            continue
+        out.append({
+            "time": e.get("time"),
+            "sender": e.get("sender_name") or e.get("sender_number") or "",
+            "matched": e.get("matched") or [],
+            "snippet": e.get("snippet") or "",
+            "action": e.get("action") or "logged",
+            "note": e.get("note") or "",
+            "conversation_id": e.get("conversation_id") or "",
+            "is_group": e.get("is_group") is True,
+        })
+        if len(out) >= RECENT_ENTRIES:
+            break
+    return out
+
+
+def spam_action(conversation_id, action):
+    """Asks OpenMessage to block or unblock. Returns (status, reply)."""
+    try:
+        with open(CONTROL_TOKEN) as f:
+            token = f.read().strip()
+    except OSError:
+        return 503, {"error": "OpenMessage isn't ready yet. Try again in a few minutes."}
+    req = urllib.request.Request(
+        BLOCK_URL, method="POST",
+        data=json.dumps({"conversation_id": conversation_id, "action": action}).encode(),
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=50) as r:
+            reply = json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            reply = json.load(e)
+        except ValueError:
+            reply = {}
+        return e.code, {"error": str(reply.get("error") or "That didn't work.")[:300]}
+    except (OSError, ValueError):
+        return 502, {"error": "OpenMessage isn't answering. Try again in a few minutes."}
+    return 200, {"ok": reply.get("ok") is True, "action": action}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "om-pair-helper"
     sys_version = ""
@@ -232,14 +372,26 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._host_ok():
             return self._send(403, {"error": "forbidden"})
-        if self.path.split("?")[0] != "/pair":
+        path = self.path.split("?")[0]
+        if path == "/spam":
+            rules = read_rules()
+            return self._send(200, {
+                "rules": {
+                    "phrases": rules.get("phrases") or [],
+                    "numbers": rules.get("numbers") or [],
+                    "mode": "block" if str(rules.get("mode", "")).strip().lower() == "block" else "log",
+                },
+                "recent": recent_spam(),
+            })
+        if path != "/pair":
             return self._send(404, {"error": "not found"})
         self._send(200, STATE.snapshot())
 
     def do_POST(self):
         if not self._host_ok():
             return self._send(403, {"error": "forbidden"})
-        if self.path.split("?")[0] != "/pair":
+        path = self.path.split("?")[0]
+        if path not in ("/pair", "/spam", "/spam/action"):
             return self._send(404, {"error": "not found"})
         try:
             n = int(self.headers.get("Content-Length") or 0)
@@ -251,6 +403,24 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n))
         except ValueError:
             return self._send(400, {"error": "bad request"})
+        if path == "/spam":
+            phrases, numbers, err = clean_rules(body)
+            if err:
+                return self._send(400, {"error": err})
+            try:
+                write_rules(phrases, numbers, body["mode"])
+            except OSError as e:
+                log(f"couldn't save spam rules: {type(e).__name__}")
+                return self._send(500, {"error": "Couldn't save the rules."})
+            log("spam rules changed")
+            return self._send(200, {"ok": True, "phrases": phrases, "numbers": numbers, "mode": body["mode"]})
+        if path == "/spam/action":
+            conv = body.get("conversation_id") if isinstance(body, dict) else None
+            action = body.get("action") if isinstance(body, dict) else None
+            if not isinstance(conv, str) or not conv.strip() or len(conv) > 300 or action not in SPAM_ACTIONS:
+                return self._send(400, {"error": "bad request"})
+            code, reply = spam_action(conv.strip(), action)
+            return self._send(code, reply)
         cookies, err = validate_cookies(body)
         if err:
             return self._send(400, {"error": err})
