@@ -7,14 +7,15 @@
 #
 # Deletes, where it finds them:
 #   - the VM (its disk and everything on it: messages, pairing, alerts)
-#   - the connector Worker, its VPC service and KV namespace (from
+#   - the connector Worker, its VPC services (origin, and the Reconnect page's
+#     PAIR service if any) and KV namespace (from
 #     cloud/worker/wrangler.<user>.toml), and the Cloudflare tunnel the VPC
 #     service used, unless another VPC service still uses that tunnel
 #   - with --delete-project: the whole Google Cloud project (Google keeps it
 #     recoverable for 30 days) and its budget alert. That also removes the
 #     Google OAuth client.
 #   - the local records: wrangler.<user>.toml, the deploy state file, the
-#     fleet entry
+#     status and Reconnect links, the hand-back report, the fleet entry
 # VM name, zone and project come from the fleet entry if there is one
 # (doctor.sh --all); flags override. Wrangler must be signed in to the user's
 # Cloudflare account. It then lists what to remove by hand (the claude.ai
@@ -59,12 +60,13 @@ fi
 NAME=${NAME:-om-$USER_NAME} ZONE=${ZONE:-us-east1-b}
 
 cfg_val() { { grep -E "^$1 = \"" "$CFG" 2>/dev/null || true; } | head -1 | sed -E 's/^[A-Za-z_]+ = "(.*)"$/\1/'; }
-WORKER= VPC_ID= KV_ID= AUTH= URL=
+WORKER= VPC_ID= PAIR_ID= KV_ID= AUTH= URL=
 if [ -f "$CFG" ]; then
   WORKER=$(cfg_val name)
   AUTH=$(cfg_val AUTH_MODE)
   URL=$(cfg_val PUBLIC_URL)
   VPC_ID=$(grep -oE "service_id = \"$UUID\"" "$CFG" | grep -oE "$UUID" | head -1 || true)
+  PAIR_ID=$(grep -A1 '^binding = "PAIR"' "$CFG" | grep -oE "$UUID" | head -1 || true)
   KV_ID=$(grep -oE '^id = "[0-9a-f]{32}"' "$CFG" | grep -oE '[0-9a-f]{32}' | head -1 || true)
 fi
 
@@ -91,6 +93,7 @@ if [ -n "$WORKER$TUNNEL" ]; then
   vpcs=$(W vpc service list 2>/dev/null || true)
   tunnels=$(W tunnel list 2>/dev/null || true)
   [ -z "$VPC_ID" ] || grep -q "$VPC_ID" <<<"$vpcs" || VPC_ID=
+  [ -z "$PAIR_ID" ] || grep -q "$PAIR_ID" <<<"$vpcs" || PAIR_ID=
   TUNNEL_ID=
   if [ -n "$VPC_ID" ]; then
     TUNNEL_ID=$(W vpc service get "$VPC_ID" 2>/dev/null | grep -oE "Tunnel ID: $UUID" | grep -oE "$UUID" || true)
@@ -102,7 +105,7 @@ if [ -n "$WORKER$TUNNEL" ]; then
   if [ -n "$TUNNEL_ID" ]; then
     TUNNEL_NAME=$(grep -E "│ *$TUNNEL_ID *│" <<<"$tunnels" | awk -F'│' '{gsub(/ /,"",$3); print $3}' | head -1)
     # The list shows a tunnel id's first 8 characters. Other services on it keep it alive.
-    TUNNEL_SHARED=$(grep -E "│ *${TUNNEL_ID:0:8}\.\.\. *│" <<<"$vpcs" | { [ -n "$VPC_ID" ] && grep -v "$VPC_ID" || cat; } \
+    TUNNEL_SHARED=$(grep -E "│ *${TUNNEL_ID:0:8}\.\.\. *│" <<<"$vpcs" | { [ -n "$VPC_ID" ] && grep -v "$VPC_ID" || cat; } | { [ -n "$PAIR_ID" ] && grep -v "$PAIR_ID" || cat; } \
       | awk -F'│' '{gsub(/ /,"",$3); print $3}' | paste -sd, - || true)
   fi
   WORKER_EXISTS=no
@@ -146,6 +149,7 @@ fi
 if [ "$CF" = yes ]; then
   [ "${WORKER_EXISTS:-no}" = no ] || item "Worker $WORKER ($URL)"
   [ -z "$VPC_ID" ] || item "VPC service $VPC_ID"
+  [ -z "$PAIR_ID" ] || item "VPC service $PAIR_ID (Reconnect page)"
   [ -z "$KV_ID" ] || item "KV namespace $KV_ID"
   if [ -n "${TUNNEL_ID:-}" ]; then
     if [ -n "$TUNNEL_SHARED" ]; then
@@ -158,7 +162,8 @@ if [ "$CF" = yes ]; then
   echo "  Cloudflare account: $CF_ACCT"
 fi
 local_files=()
-for f in "$CFG" "$DONE" "$PORT_FILE"; do [ -f "$f" ] && local_files+=("$f"); done
+EXTRA_FILES=("$STATE_DIR/status-$USER_NAME.url" "$STATE_DIR/reconnect-$USER_NAME.url" "$STATE_DIR/handback-$USER_NAME.txt")
+for f in "$CFG" "$DONE" "$PORT_FILE" "${EXTRA_FILES[@]}"; do [ -f "$f" ] && local_files+=("$f"); done
 in_fleet=no
 [ -s "$FLEET" ] && awk -F'\t' -v l="$USER_NAME" '$1 == l {f=1} END {exit !f}' "$FLEET" && in_fleet=yes
 [ ${#local_files[@]} -eq 0 ] || item "local files: ${local_files[*]/#$HOME/~}"
@@ -182,6 +187,7 @@ fi
 if [ "$CF" = yes ]; then
   [ "$WORKER_EXISTS" = no ] || run "Worker $WORKER deleted" bash -c "yes | (cd '$WDIR' && npx --no-install wrangler delete --name '$WORKER' --force)"
   [ -z "$VPC_ID" ] || run "VPC service deleted" W vpc service delete "$VPC_ID"
+  [ -z "$PAIR_ID" ] || run "Reconnect VPC service deleted" W vpc service delete "$PAIR_ID"
   [ -z "$KV_ID" ] || run "KV namespace deleted" W kv namespace delete --namespace-id "$KV_ID" -y
   if [ -n "${TUNNEL_ID:-}" ] && [ -z "$TUNNEL_SHARED" ]; then
     # The VM's connection takes a moment to drop after the VM is gone.
@@ -201,7 +207,10 @@ if [ "$PROJ" = yes ]; then
   run "project $PROJECT deleted" gcloud projects delete "$PROJECT" --quiet
 fi
 if [ $fail -eq 0 ]; then
-  rm -f "$CFG" "$DONE" "$PORT_FILE"
+  rm -f "$CFG" "$DONE" "$PORT_FILE" "${EXTRA_FILES[@]}"
+  if [ -s "$STATE_DIR/handed-back" ]; then
+    tmp=$(mktemp); grep -vx "$USER_NAME" "$STATE_DIR/handed-back" > "$tmp" || true; mv "$tmp" "$STATE_DIR/handed-back"
+  fi
   if [ "$in_fleet" = yes ]; then
     tmp=$(mktemp); awk -F'\t' -v l="$USER_NAME" '$1 != l' "$FLEET" > "$tmp" && mv "$tmp" "$FLEET"
   fi
