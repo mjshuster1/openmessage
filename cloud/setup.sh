@@ -37,8 +37,12 @@ STATE_DIR=$HOME/.config/openmessage
 ANSWERS=$STATE_DIR/setup.env
 mkdir -p "$STATE_DIR"
 stop() { printf '\n%s\n\nFix that, then paste the same line again to carry on.\n' "$*" >&2; exit 1; }
+# Ctrl+C is how Windows people copy, and here it cancels (first real client,
+# 2026-11-06). deploy.sh, which this hands over to, sets the same trap.
+trap 'printf "\n\nStopped: in this window Ctrl+C cancels instead of copying. Nothing is lost.\nPaste the same line again to carry on.\n" >&2; exit 130' INT
 
 printf '\n\033[1mYour texts in Claude: setup\033[0m\n'
+echo "In this window, Ctrl+C cancels. To copy, highlight the text and right-click."
 [ "${CLOUD_SHELL:-}" = true ] || [ -n "${DEVSHELL_PROJECT_ID+x}" ] || {
   echo "This doesn't look like Google Cloud Shell. Open https://shell.cloud.google.com/?show=terminal and run it there."
   read -rp "Carry on here anyway? [y/N] " yn; [[ "$yn" == [yY]* ]] || exit 1

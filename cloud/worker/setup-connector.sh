@@ -288,7 +288,8 @@ if [[ "$yn" == [yY]* ]]; then
         Type: Web application. Under Authorized redirect URIs, Add URI:
           $PUBLIC_URL/callback$( [ "$RECONNECT" = yes ] && printf '\n        Add URI again:\n          %s/reconnect/callback' "$PUBLIC_URL")
         Create. Leave that box open: it shows the client ID and secret.
-     d. Paste them here (the secret won't show as you paste it).
+     d. Paste them here (the secret won't show as you paste it). Use Ctrl+V or
+        right-click to paste; don't press Ctrl+C in this window.
 EOF
   while :; do
     read -rp "   Client ID: " CID

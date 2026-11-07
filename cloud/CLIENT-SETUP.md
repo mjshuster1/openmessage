@@ -23,11 +23,15 @@ It stays out of this public repository.
 4. They do the Google sign-in step, about 5 minutes, from three direct links
    printed on screen.
 5. They open their Reconnect page, get the Reconnect app, sign in to Google in
-   the window it opens, and tap the emoji on their phone.
+   the window it opens, close that window once Google Messages shows, and tap
+   the emoji on their phone. Windows may block the app at first; the page says
+   how to allow it.
 6. They add the connector in claude.ai and ask for their last three texts.
 7. It emails both of you their links and shows them the access report.
 
-If anything stops, they fix what it says and paste the same line again.
+If anything stops, they fix what it says and paste the same line again. That
+includes pressing Ctrl+C by accident, which cancels in that window instead of
+copying.
 Finished steps are skipped. Cloud Shell closes after about 40 idle minutes;
 reopen it and paste the line again.
 

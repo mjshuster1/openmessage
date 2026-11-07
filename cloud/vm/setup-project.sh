@@ -86,7 +86,7 @@ step "4/4 Budget alert (\$$BUDGET/month)"
 NAME="openmessage $PROJECT"
 if [ -z "$BILLING" ]; then
   need "budget (no billing account yet)"
-elif gcloud billing budgets list --billing-account "$BILLING" --format='value(displayName)' 2>/dev/null | grep -qxF "$NAME"; then
+elif gcloud billing budgets list --billing-project "$PROJECT" --billing-account "$BILLING" --format='value(displayName)' 2>/dev/null | grep -qxF "$NAME"; then
   echo "   exists"
 elif [ "$CHECK" = yes ]; then
   need "budget alert"
@@ -95,7 +95,10 @@ else
   # A just-enabled API can take a minute to answer, so try a few times.
   made=no
   for try in 1 2 3 4; do
-    if err=$(gcloud billing budgets create --billing-account "$BILLING" --display-name "$NAME" \
+    # --billing-project: Google checks the API is on in the project gcloud is
+    # pointed at, and in a fresh Cloud Shell that isn't this one
+    # (SERVICE_DISABLED on the first real client, 2026-11-06).
+    if err=$(gcloud billing budgets create --billing-project "$PROJECT" --billing-account "$BILLING" --display-name "$NAME" \
         --budget-amount "${BUDGET}USD" --filter-projects "projects/$PROJECT" \
         --threshold-rule percent=0.5 --threshold-rule percent=1.0 2>&1); then
       made=yes; break

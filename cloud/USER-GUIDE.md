@@ -55,7 +55,8 @@ commands for you to run.
   Reconnect link in that email (it's also in your setup report) on a
   computer with Google Chrome. The page walks you through it: get the
   OpenMessage Reconnect app (once), copy the code, open the app, sign in to
-  Google in the window it opens, then tap the emoji the page shows on your
+  Google in the window it opens, close that window once Google Messages shows,
+  then tap the emoji the page shows on your
   phone. Up to 3 tries a day; if it still fails, contact whoever set it up.
 - **If it's hosted for you**, the person who runs your service arranges a
   time: you sign in to Google when asked, then tap the matching emoji on your

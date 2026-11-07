@@ -90,6 +90,9 @@ if [ "$CLIENT_OWNED" = yes ] && [ "$ALERTS" = email ] && [ -z "$ALERT_EMAIL" ]; 
   echo "--client-owned needs --alert-email <your address> (gcloud is signed in as the client)" >&2; exit 2
 fi
 [ "$FROM_BROWSER" = no ] || [ "$CLIENT_OWNED" = yes ] || { echo "--from-browser needs --client-owned" >&2; exit 2; }
+if [ "$FROM_BROWSER" = yes ]; then
+  trap 'printf "\n\nStopped: in this window Ctrl+C cancels instead of copying. Nothing is lost.\nPaste the same line again to carry on.\n" >&2; exit 130' INT
+fi
 NAME=${NAME:-om-$USER_NAME} TUNNEL=${TUNNEL:-om-$USER_NAME} WORKER=${WORKER:-om-$USER_NAME}
 LABEL=${LABEL:-$USER_NAME}
 [[ "$LABEL" =~ ^[A-Za-z0-9\ _.-]{1,30}$ ]] || { echo "--label: up to 30 letters, digits, spaces, . _ -" >&2; exit 2; }

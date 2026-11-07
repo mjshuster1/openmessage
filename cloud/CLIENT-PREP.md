@@ -38,8 +38,12 @@ This is the secure connection between your texts and Claude.
 
 - You can sign in at **claude.ai** in a web browser, on a paid plan
   (Pro or above) so you can add a connector.
-- Your computer (Mac or Windows) has **Google Chrome**. You'll need it if
-  you ever have to reconnect.
+- Your computer (Mac or Windows) has **Google Chrome**. You'll need it during
+  setup and if you ever have to reconnect.
+- It can install an app from outside the app store. On Windows, check Settings,
+  Apps, Advanced app settings, Choose where to get apps: it should say
+  **Anywhere**, or at least offer it. If it's a work computer that's locked
+  down, or Windows in S mode, bring a different computer.
 
 ## 5. For the call itself
 
