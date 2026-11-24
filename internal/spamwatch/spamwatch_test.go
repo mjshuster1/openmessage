@@ -258,3 +258,26 @@ func contains(list []string, s string) bool {
 	}
 	return false
 }
+
+func TestSalesPitchPhrasesMatchAndContractorsDoNot(t *testing.T) {
+	pitches := []string{
+		"Hi, it's Alex from American Home Warranty. Your home is approved for coverage on A/C, heating, plumbing & appliances. What's the best email to send your quote?",
+		"Spring special: tree trimming this week, 20% off!",
+		"Time for your HVAC tune-up. Reply to book.",
+	}
+	for _, body := range pitches {
+		if got := matchRules(Rules{}, "+15550001111", body); len(got) == 0 {
+			t.Errorf("pitch not matched: %q", body)
+		}
+	}
+	real := []string{
+		"Hi Matt, this is Dave from Smith HVAC, we'll be there at 2pm to look at the unit.",
+		"The tree crew is running late, should arrive around 10.",
+		"Your appointment is confirmed for Thursday.",
+	}
+	for _, body := range real {
+		if got := matchRules(Rules{}, "+15550002222", body); len(got) != 0 {
+			t.Errorf("real text matched %v: %q", got, body)
+		}
+	}
+}

@@ -60,6 +60,24 @@ var BuiltinPhrases = []string{
 	"your ballot",
 	"vote for",
 	"election day",
+	// Cold sales pitches (home warranty, auto warranty, home services).
+	// Phrases are worded like a pitch, not like a job someone hired: bare
+	// words such as "hvac" or "tree" would hit real contractors.
+	"home warranty",
+	"home protection plan",
+	"approved for coverage",
+	"extended warranty",
+	"vehicle service contract",
+	"send your quote",
+	"send you a quote",
+	"free inspection",
+	"tree trimming",
+	"tree pruning",
+	"tree removal",
+	"hvac tune-up",
+	"hvac tune up",
+	"a/c tune-up",
+	"furnace tune-up",
 }
 
 // Rules is the shape of spam-rules.json. Phrases match case-insensitively
